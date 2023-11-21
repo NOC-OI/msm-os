@@ -36,7 +36,7 @@ def msm_os():
         variables = list(args.variables)
 
     if args.action == "send":
-        if vars == "all":
+        if vars == "compact":
             send_vars_indep = False
         else:
             send_vars_indep = True
