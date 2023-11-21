@@ -14,7 +14,7 @@ To send a file to the Object Store, use the following command:
 msm_os send -f eORCA025_1y_grid_T_1976-1976.nc -c credentials.json -b eorca025
 ```
 
-Since no `object_prefix` is provided, the variables will be stored in `eorca025/<var>/eORCA025_1y_grid_T.zarr`.
+Since no `--prefix` is provided, the variables will be stored in `eorca025/<var>/eORCA025_1y_grid_T.zarr`.
 
 ### Updating or Replacing Files
 
