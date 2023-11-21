@@ -30,7 +30,7 @@ This will locate the region with the same timestamp as given by `eORCA025_1y_gri
 
 | Long version | Short Version | Description |
 |---|---|---|
-| `action` | | Specify the action: `send` to send a file or `update` to update an existing object. |
+| action | | Specify the action: `send` to send a file or `update` to update an existing object. |
 | `--filepaths` | `-f` | Paths to the files to send or update. |
 | `--credentials` | `-c` | Path to the JSON file containing the credentials for the object store. |
 | `--bucket` | `-b` | Bucket name. |
@@ -39,9 +39,9 @@ This will locate the region with the same timestamp as given by `eORCA025_1y_gri
 
 | Flag | Short Version | Description |
 |---|---|---|
-| `--object_prefix` | `-p` | Object prefix. |
+| `--prefix` | `-p` | Object prefix. |
 | `--append_dim` | `-a` | Append dimension (default=`time_counter`). |
-| `--variables` | `-v` | Variables to send. |
+| `--variables` | `-v` | Variables to send. If not provided, all variables will be sent.  If set to `compact`, the variables will not be sent to separate Zarr files. |
 
 ## Credentials File
 
@@ -51,6 +51,6 @@ The credentials file should contain the following information:
 {
     "secret": "your_secret",
     "token": "your_token",
-    "endpoint_url": "[https://noc-msm-o.s3-ext.jc.rl.ac.uk](https://noc-msm-o.s3-ext.jc.rl.ac.uk)"
+    "endpoint_url": "https://noc-msm-o.s3-ext.jc.rl.ac.uk"
 }
 ``````
