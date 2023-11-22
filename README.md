@@ -22,6 +22,7 @@ The flags used are the following:
 
 Since no `--prefix` is provided, the variables will be stored in `eorca025/T1y/<var>.zarr`. If a `--prefix` is provided, the variables will be stored in `eorca025/<prefix>/<var>.zarr`.
 
+Note that a list of variables to be sent to the object store can be specified using the `-v` flag. If this is not provided, all variables will be sent.
 
 ### Updating or Replacing Files
 
