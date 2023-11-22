@@ -10,8 +10,20 @@ logger = logging.getLogger(__name__)
 
 def banner():
     """Log the msm_os banner."""
-    logger.info("msm_os", extra={"simple": True})
-    logger.info(f"version: {__version__}", extra={"simple": True})
+    logger.info(
+        f"""
+          .-~~~-.
+  .- ~ ~-(       )_ _
+ /                    ~ -.
+|          msm-os         ',
+ ¬                         .'
+   ~- ._ ,. ,.,.,., ,.. -~
+           '       '
+       version: {__version__}
+
+""",
+        extra={"simple": True},
+    )
 
 
 def msm_os():
@@ -22,6 +34,7 @@ def msm_os():
         level=logging.INFO,
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    banner()
 
     parser = create_parser()
     args = parser.parse_args()
@@ -51,7 +64,6 @@ def msm_os():
             object_prefix=args.object_prefix,
             to_zarr_kwargs=None,
         )
-        sys.exit(0)
 
     elif args.action == "update":
         update(
@@ -62,6 +74,8 @@ def msm_os():
             object_prefix=args.object_prefix,
             to_zarr_kwargs=None,
         )
-        sys.exit(0)
     else:
         raise NotImplementedError(f"Action {args.action} not implemented.")
+
+    logging.info("msm_os finished successfully.")
+    sys.exit(0)

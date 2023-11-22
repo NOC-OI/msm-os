@@ -47,7 +47,6 @@ class ObjectStoreS3(s3fs.S3FileSystem):
             _description_, by default None
         """
         self._anon = anon
-        logging.info("-" * 79)
         if store_credentials_json is None:
             logging.info(
                 "No JSON file was provided."
@@ -60,8 +59,7 @@ class ObjectStoreS3(s3fs.S3FileSystem):
             }
         else:
             logging.info(
-                "Object store credentials will be read from the JSON file "
-                + f"{store_credentials_json}"
+                f"Reading object store credentials from {store_credentials_json}"
             )
             self._store_credentials = self.load_store_credentials(
                 store_credentials_json
