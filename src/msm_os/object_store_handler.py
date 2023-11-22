@@ -52,7 +52,7 @@ def update(
         variables = _get_update_variables(ds_filepath, variables)
 
         for var in variables:
-            dest = f"{bucket}/{var}/{object_prefix}.zarr"
+            dest = f"{bucket}/{object_prefix}/{var}.zarr"
 
             check_variable_exists(ds_filepath, var)
             check_destination_exists(obj_store, dest)
@@ -136,14 +136,17 @@ def _get_object_prefix(filepath: str, object_prefix: Optional[str]) -> str:
         The object prefix.
     """
     if not object_prefix:
-        object_prefix = os.path.basename(filepath).rsplit(".")[0].rsplit("_", 1)[0]
-        object_prefix = object_prefix.replace("_", "-").lower()
+        str_components = os.path.basename(filepath).split("_")
+
+        if str_components[2] == "grid":
+            object_prefix = str_components[3] + str_components[1]
+        else:
+            object_prefix = str_components[2] + str_components[1]
+
     return object_prefix
 
 
-def _get_update_variables(
-    ds_filepath: xr.Dataset, variables: Optional[List[str]]
-) -> List[str]:
+def _get_update_variables(ds_filepath: xr.Dataset, variables: List[str]) -> List[str]:
     """
     Get the variables to update.
 
@@ -244,7 +247,7 @@ def _send_data_to_store(
         for var in variables:
             check_variable_exists(ds_filepath, var)
 
-            dest = f"{bucket}/{var}/{object_prefix}.zarr"
+            dest = f"{bucket}/{object_prefix}/{var}.zarr"
             mapper = obj_store.get_mapper(dest)
             try:
                 check_destination_exists(obj_store, dest)
