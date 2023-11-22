@@ -14,8 +14,9 @@ def create_parser():
     # Send and Update are mutually exclusive operations
     parser.add_argument(
         "action",
-        choices=["send", "update"],
-        help="Specify the action: 'send' to send a file or 'update' to update an existing object.",
+        choices=["send", "update", "list"],
+        help="Specify the action: 'send' to send a file to an object store, "
+        "'update' to update an existing object, or 'list' to list the files in a bucket.",
     )
 
     # Always required
@@ -23,9 +24,9 @@ def create_parser():
         "-f",
         "--filepaths",
         dest="filepaths",
-        help="Paths to the the files to send.",
+        help="Paths to the files to send.",
         nargs="+",
-        required=True,
+        required=False,
     )
 
     parser.add_argument(
