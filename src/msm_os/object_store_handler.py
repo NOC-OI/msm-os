@@ -1,7 +1,7 @@
-"""Module with functions to handle object store operations."""
+"""Module with object store handlers."""
 import logging
 import os
-from typing import List
+from typing import Any, List, Optional
 
 import numpy as np
 import xarray as xr
@@ -18,60 +18,42 @@ def update(
     filepaths: List[str],
     bucket: str,
     store_credentials_json: str,
-    variables: List[str] | None = None,
-    object_prefix: str | None = None,
-    to_zarr_kwargs: dict | None = None,
+    variables: Optional[List[str]] = None,
+    object_prefix: Optional[str] = None,
+    to_zarr_kwargs: Optional[dict] = None,
 ) -> None:
     """
-    Update a region of a Zarr object in an object store.
+    Update/replace the object store with new data.
 
     Parameters
     ----------
     filepaths
-        Path(s) to the the file(s) to be sent.
+        List of filepaths to the datasets to be updated.
     bucket
-        Bucket name.
+        Name of the bucket in the object store.
     store_credentials_json
-        Path to the JSON file containing the credentials for the Object Store.#
+        Path to the JSON file containing the object store credentials.
     variables
-        Variables to update.
-    object_prefix
-        Object prefix.
+        List of variables to be updated. If None, all variables will be updated, by default None.
+    object_prefix :
+        Prefix to be added to the object names in the object store, by default None.
     to_zarr_kwargs
-        Keyword arguments to pass to the `xr.open_zarr` function.
-
-    Returns
-    -------
-    None
+        Additional keyword arguments passed to xr.Dataset.to_zarr(), by default None.
     """
     to_zarr_kwargs = to_zarr_kwargs or {}
 
-    # Create an ObjectStoreS3 instance
     obj_store = ObjectStoreS3(anon=False, store_credentials_json=store_credentials_json)
-
-    # Check if the bucket exists
     check_destination_exists(obj_store, bucket)
 
     for filepath in filepaths:
-        # Rename the file name if required
-        if not object_prefix:
-            object_prefix = os.path.basename(filepath).rsplit(".")[0].rsplit("_", 1)[0]
-            object_prefix = object_prefix.replace("_", "-").lower()
+        object_prefix = _get_object_prefix(filepath, object_prefix)
 
-        # Open the dataset from the provided filepath
         ds_filepath = xr.open_dataset(filepath)
+        variables = _get_update_variables(ds_filepath, variables)
 
-        # Get the list of variables to update
-        variables = variables or [
-            var for var in ds_filepath.variables if var not in ds_filepath.coords
-        ]
-
-        # Apply update operation for each variable in the list
         for var in variables:
-            # Create a mapper and open the dataset
             dest = f"{bucket}/{var}/{object_prefix}.zarr"
 
-            # Sanity checks
             check_variable_exists(ds_filepath, var)
             check_destination_exists(obj_store, dest)
 
@@ -79,137 +61,218 @@ def update(
             ds_obj_store = xr.open_zarr(mapper)
             check_variable_exists(ds_obj_store, var)
 
-            # Define the region to update
-            logging.info(f"Updating {dest}")
-
-            filepath_time = ds_filepath.time_counter.values
-            index = np.where(
-                np.abs(ds_obj_store.time_counter.values - filepath_time)
-                < np.timedelta64(1, "ns")
-            )[0]
-
-            if len(index) == 0:
-                raise ValueError(
-                    f"No matching time_counter found for {filepath_time[0]} of {filepath}"
-                )
-
-            index = int(index[0])
-            region = {"time_counter": slice(index, index + 1, None)}
-
-            # When setting `region` explicitly in to_zarr(),
-            # all variables in the dataset must have
-            # at least one dimension in common with the region's dimensions.
-            # Hence, we drop variables that do not satisfy this requisit
-            # before exporting to zarr.
-            vars_to_drop = [
-                var
-                for var in ds_filepath.variables
-                if not any(dim in region.keys() for dim in ds_filepath[var].dims)
-            ]
-            ds_filepath = ds_filepath.drop_vars(vars_to_drop)
-
-            # Update the data corresponding to the specified time_counter
-
-            ds_filepath[var].to_zarr(mapper, mode="r+", region=region)
-
-            logging.info(f"Updated {dest} at {filepath_time[0]}")
+            _update_data(ds_filepath, ds_obj_store, var, mapper)
 
 
 def send(
     filepaths: List[str],
     bucket: str,
     store_credentials_json: str,
-    variables: List[str] | None = None,
+    variables: Optional[List[str]] = None,
     send_vars_indep: bool = True,
     append_dim: str = "time_counter",
-    object_prefix: str | None = None,
-    to_zarr_kwargs: dict | None = None,
+    object_prefix: Optional[str] = None,
+    to_zarr_kwargs: Optional[dict] = None,
 ) -> None:
     """
-    Send a Zarr file to an Object Store.
+    Send data to the object store.
 
     Parameters
     ----------
     filepaths
-        Path to the the file to be sent.
+        List of filepaths to the datasets to be sent.
     bucket
-        Bucket name.
+        Name of the bucket in the object store.
     store_credentials_json
-        Path to the JSON file containing the credentials for the Object Store.#
+        Path to the JSON file containing the object store credentials.
     variables
-        Variables to send.
+        List of variables to send. If None, all variables will be sent, by default None.
     send_vars_indep
-        Send independent variables.
+        Whether to send variables as separate objects, by default True.
     append_dim
-        Append dimension.
+        Name of the append dimension, by default "time_counter".
     object_prefix
-        Object prefix.
+        Prefix to be added to the object names in the object store, by default None.
     to_zarr_kwargs
-        Keyword arguments to pass to the `xr.open_zarr` function.
-
-    Returns
-    -------
-    None
+        Additional keyword arguments passed to xr.Dataset.to_zarr(), by default None.
     """
     to_zarr_kwargs = to_zarr_kwargs or {}
 
-    # Create an ObjectStoreS3 instance
     obj_store = ObjectStoreS3(anon=False, store_credentials_json=store_credentials_json)
 
-    # Create the bucket if it doesn't exist
     if not obj_store.exists(bucket):
         logging.info(f"Bucket '{bucket}' doesn't exist. Creating...")
         obj_store.create_bucket(bucket)
 
     for filepath in filepaths:
-        # Open the dataset
         ds_filepath = xr.open_dataset(filepath)
+        object_prefix = _get_object_prefix(filepath, object_prefix)
 
-        # Rename the file name if required
-        if not object_prefix:
-            object_prefix = os.path.basename(filepath).rsplit(".")[0].rsplit("_", 1)[0]
-            object_prefix = object_prefix.replace("_", "-").lower()
+        _send_data_to_store(
+            obj_store,
+            bucket,
+            ds_filepath,
+            object_prefix,
+            variables,
+            append_dim,
+            send_vars_indep,
+        )
 
-        # Send data to the object store
-        if send_vars_indep:
-            # Get the list of variables to send
-            variables = variables or [
-                var for var in ds_filepath.variables if var not in ds_filepath.coords
-            ]
 
-            for var in variables:
-                check_variable_exists(ds_filepath, var)
+def _get_object_prefix(filepath: str, object_prefix: Optional[str]) -> str:
+    """
+    Get the object prefix from the filepath.
 
-                dest = f"{bucket}/{var}/{object_prefix}.zarr"
-                mapper = obj_store.get_mapper(dest)
-                try:
-                    check_destination_exists(obj_store, dest)
-                    check_duplicates(ds_filepath, mapper, append_dim)
+    Parameters
+    ----------
+    filepath
+        Filepath to the dataset.
+    object_prefix
+        Prefix to be added to the object names in the object store.
 
-                    logging.info(f"Appending to {dest}")
-                    ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
-                except FileNotFoundError:
-                    logging.info(f"Creating {dest}")
-                    ds_filepath[var].to_zarr(mapper, mode="w")
-        else:
-            dest = f"{bucket}/{object_prefix}.zarr"
+    Returns
+    -------
+    str
+        The object prefix.
+    """
+    if not object_prefix:
+        object_prefix = os.path.basename(filepath).rsplit(".")[0].rsplit("_", 1)[0]
+        object_prefix = object_prefix.replace("_", "-").lower()
+    return object_prefix
+
+
+def _get_update_variables(
+    ds_filepath: xr.Dataset, variables: Optional[List[str]]
+) -> List[str]:
+    """
+    Get the variables to update.
+
+    Parameters
+    ----------
+    ds_filepath
+        Filepath to the dataset.
+    variables
+        List of variables to update. If None, all variables will be updated, by default None.
+
+    Returns
+    -------
+    List[str]
+        The list of variables to update.
+    """
+    variables = variables or [
+        var for var in ds_filepath.variables if var not in ds_filepath.coords
+    ]
+    return variables
+
+
+def _update_data(
+    ds_filepath: xr.Dataset, ds_obj_store: xr.Dataset, var: str, mapper: Any
+) -> None:
+    """
+    Update the data in the object store.
+
+    Parameters
+    ----------
+    ds_filepath
+        Filepath to the local dataset.
+    ds_obj_store
+        Dataset in the object store.
+    var
+        Variable to be updated.
+    mapper
+        Object store mapper.
+    """
+    logging.info(f"Updating {mapper.root}")
+
+    filepath_time = ds_filepath.time_counter.values
+    index = np.where(
+        np.abs(ds_obj_store.time_counter.values - filepath_time)
+        < np.timedelta64(1, "ns")
+    )[0]
+
+    if len(index) == 0:
+        raise ValueError(
+            f"No matching time_counter found for {filepath_time[0]} of {ds_filepath}"
+        )
+
+    index = int(index[0])
+    region = {"time_counter": slice(index, index + 1, None)}
+
+    vars_to_drop = [
+        var
+        for var in ds_filepath.variables
+        if not any(dim in region.keys() for dim in ds_filepath[var].dims)
+    ]
+    ds_filepath = ds_filepath.drop_vars(vars_to_drop)
+
+    ds_filepath[var].to_zarr(mapper, mode="r+", region=region)
+    logging.info(f"Updated {mapper.root} at {filepath_time[0]}")
+
+
+def _send_data_to_store(
+    obj_store: ObjectStoreS3,
+    bucket: str,
+    ds_filepath: xr.Dataset,
+    object_prefix: Optional[str],
+    variables: Optional[List[str]],
+    append_dim: str,
+    send_vars_indep: bool,
+) -> None:
+    """
+    Send data to the object store.
+
+    Parameters
+    ----------
+    obj_store
+        Object store to be used.
+    bucket
+        Name of the bucket in the object store.
+    ds_filepath
+        Dataset to be sent.
+    object_prefix
+        Prefix to be added to the object names in the object store.
+    variables
+        List of variables to send. If None, all variables will be sent.
+    append_dim
+        Name of the append dimension.
+    send_vars_indep
+        Whether to send variables as separate objects.
+    """
+    if send_vars_indep:
+        variables = _get_update_variables(ds_filepath, variables)
+
+        for var in variables:
+            check_variable_exists(ds_filepath, var)
+
+            dest = f"{bucket}/{var}/{object_prefix}.zarr"
             mapper = obj_store.get_mapper(dest)
-
             try:
                 check_destination_exists(obj_store, dest)
                 check_duplicates(ds_filepath, mapper, append_dim)
 
                 logging.info(f"Appending to {dest}")
-                ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
-            except ValueError:
+                ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
+            except FileNotFoundError:
                 logging.info(f"Creating {dest}")
-                ds_filepath.to_zarr(mapper, mode="w")
+                ds_filepath[var].to_zarr(mapper, mode="w")
+    else:
+        dest = f"{bucket}/{object_prefix}.zarr"
+        mapper = obj_store.get_mapper(dest)
+
+        try:
+            check_destination_exists(obj_store, dest)
+            check_duplicates(ds_filepath, mapper, append_dim)
+
+            logging.info(f"Appending to {dest}")
+            ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
+        except ValueError:
+            logging.info(f"Creating {dest}")
+            ds_filepath.to_zarr(mapper, mode="w")
 
 
 def get_files(
     bucket: str,
     store_credentials_json: str,
-    object_prefix: str,
 ) -> List[str]:
     """
     Get the list of files in the bucket.
@@ -220,8 +283,6 @@ def get_files(
         Bucket name.
     store_credentials_json
         Path to the JSON file containing the credentials for the Object Store.#
-    object_prefix
-        Object prefix.
 
     Returns
     -------
