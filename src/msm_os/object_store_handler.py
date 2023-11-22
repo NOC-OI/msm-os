@@ -124,6 +124,10 @@ def _get_object_prefix(filepath: str, object_prefix: Optional[str]) -> str:
     """
     Get the object prefix from the filepath.
 
+    Note
+    ----
+    Change this function if required.
+
     Parameters
     ----------
     filepath
