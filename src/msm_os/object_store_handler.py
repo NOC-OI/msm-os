@@ -6,8 +6,12 @@ from typing import List
 import numpy as np
 import xarray as xr
 
-from .exceptions import VariableNotFound
 from .object_store import ObjectStoreS3
+from .sanity_cheks import (
+    check_destination_exists,
+    check_duplicates,
+    check_variable_exists,
+)
 
 
 def update(
@@ -45,6 +49,9 @@ def update(
     # Create an ObjectStoreS3 instance
     obj_store = ObjectStoreS3(anon=False, store_credentials_json=store_credentials_json)
 
+    # Check if the bucket exists
+    check_destination_exists(obj_store, bucket)
+
     for filepath in filepaths:
         # Rename the file name if required
         if not object_prefix:
@@ -61,18 +68,20 @@ def update(
 
         # Apply update operation for each variable in the list
         for var in variables:
-            if var not in ds_filepath:
-                raise VariableNotFound(var)
-
             # Create a mapper and open the dataset
             dest = f"{bucket}/{var}/{object_prefix}.zarr"
+
+            # Sanity checks
+            check_variable_exists(ds_filepath, var)
+            check_destination_exists(obj_store, dest)
+
             mapper = obj_store.get_mapper(dest)
             ds_obj_store = xr.open_zarr(mapper)
-            logging.info(f"Updating {dest}")
-            if var not in ds_obj_store:
-                raise VariableNotFound(var)
+            check_variable_exists(ds_obj_store, var)
 
             # Define the region to update
+            logging.info(f"Updating {dest}")
+
             filepath_time = ds_filepath.time_counter.values
             index = np.where(
                 np.abs(ds_obj_store.time_counter.values - filepath_time)
@@ -154,7 +163,7 @@ def send(
 
     for filepath in filepaths:
         # Open the dataset
-        ds = xr.open_dataset(filepath)
+        ds_filepath = xr.open_dataset(filepath)
 
         # Rename the file name if required
         if not object_prefix:
@@ -164,28 +173,65 @@ def send(
         # Send data to the object store
         if send_vars_indep:
             # Get the list of variables to send
-            variables = variables or [var for var in ds.variables]
+            variables = variables or [
+                var for var in ds_filepath.variables if var not in ds_filepath.coords
+            ]
 
             for var in variables:
-                if var not in ds:
-                    raise VariableNotFound(var)
+                check_variable_exists(ds_filepath, var)
 
                 dest = f"{bucket}/{var}/{object_prefix}.zarr"
                 mapper = obj_store.get_mapper(dest)
+                print(type(mapper))
+                exit()
                 try:
-                    # TODO: add check to verify if time_counter is present
-                    ds[var].to_zarr(mapper, mode="a", append_dim=append_dim)
-                    logging.info(f"Appended to {dest}")
-                except ValueError:
-                    ds[var].to_zarr(mapper, mode="w")
-                    logging.info(f"Created {dest}")
+                    check_destination_exists(obj_store, dest)
+                    check_duplicates(ds_filepath, mapper, append_dim)
+
+                    logging.info(f"Appending to {dest}")
+                    ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
+                except FileNotFoundError:
+                    logging.info(f"Creating {dest}")
+                    ds_filepath[var].to_zarr(mapper, mode="w")
         else:
             dest = f"{bucket}/{object_prefix}.zarr"
             mapper = obj_store.get_mapper(dest)
+
             try:
-                # TODO: add check to verify if time_counter is present
-                ds.to_zarr(mapper, mode="a", append_dim=append_dim)
-                logging.info(f"Appended to {dest}")
+                check_destination_exists(obj_store, dest)
+                check_duplicates(ds_filepath, mapper, append_dim)
+
+                logging.info(f"Appending to {dest}")
+                ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
             except ValueError:
-                ds.to_zarr(mapper, mode="w")
-                logging.info(f"Created {dest}")
+                logging.info(f"Creating {dest}")
+                ds_filepath.to_zarr(mapper, mode="w")
+
+
+def get_files(
+    bucket: str,
+    store_credentials_json: str,
+    object_prefix: str,
+) -> List[str]:
+    """
+    Get the list of files in the bucket.
+
+    Parameters
+    ----------
+    bucket
+        Bucket name.
+    store_credentials_json
+        Path to the JSON file containing the credentials for the Object Store.#
+    object_prefix
+        Object prefix.
+
+    Returns
+    -------
+    List[str]
+        List of files in the bucket.
+    """
+    obj_store = ObjectStoreS3(anon=False, store_credentials_json=store_credentials_json)
+    logging.info(f"List of files in bucket '{bucket}':")
+    for file in obj_store.ls(f"{bucket}"):
+        logging.info(file)
+    return obj_store.ls(f"{bucket}")
