@@ -1,3 +1,5 @@
+"""Command line interface (CLI) module."""
+
 import logging
 import sys
 
