@@ -65,19 +65,26 @@ def update(
                 raise VariableNotFound(var)
 
             # Create a mapper and open the dataset
-            mapper = obj_store.get_mapper(f"{bucket}/{var}/{object_prefix}.zarr")
+            dest = f"{bucket}/{var}/{object_prefix}.zarr"
+            mapper = obj_store.get_mapper(dest)
             ds_obj_store = xr.open_zarr(mapper)
-
+            logging.info(f"Updating {dest}")
             if var not in ds_obj_store:
                 raise VariableNotFound(var)
 
             # Define the region to update
-            index = int(
-                np.where(
-                    np.abs(ds_obj_store.time_counter - ds_filepath.time_counter)
-                    < np.timedelta64(1, "ns")
-                )[0][0]
-            )
+            filepath_time = ds_filepath.time_counter.values
+            index = np.where(
+                np.abs(ds_obj_store.time_counter.values - filepath_time)
+                < np.timedelta64(1, "ns")
+            )[0]
+
+            if len(index) == 0:
+                raise ValueError(
+                    f"No matching time_counter found for {filepath_time[0]} of {filepath}"
+                )
+
+            index = int(index[0])
             region = {"time_counter": slice(index, index + 1, None)}
 
             # When setting `region` explicitly in to_zarr(),
@@ -93,10 +100,10 @@ def update(
             ds_filepath = ds_filepath.drop_vars(vars_to_drop)
 
             # Update the data corresponding to the specified time_counter
-            time = ds_filepath.time_counter.values[0]
+
             ds_filepath[var].to_zarr(mapper, mode="r+", region=region)
 
-            logging.info(f"Updated {bucket}/{var}/{object_prefix}.zarr at {time}")
+            logging.info(f"Updated {dest} at {filepath_time[0]}")
 
 
 def send(
@@ -163,16 +170,22 @@ def send(
                 if var not in ds:
                     raise VariableNotFound(var)
 
-                mapper = obj_store.get_mapper(f"{bucket}/{var}/{object_prefix}.zarr")
+                dest = f"{bucket}/{var}/{object_prefix}.zarr"
+                mapper = obj_store.get_mapper(dest)
                 try:
+                    # TODO: add check to verify if time_counter is present
                     ds[var].to_zarr(mapper, mode="a", append_dim=append_dim)
-                    logging.info(f"Appended to {bucket}/{var}/{object_prefix}.zarr")
+                    logging.info(f"Appended to {dest}")
                 except ValueError:
                     ds[var].to_zarr(mapper, mode="w")
-                    logging.info(f"Created {bucket}/{var}/{object_prefix}.zarr")
+                    logging.info(f"Created {dest}")
         else:
-            mapper = obj_store.get_mapper(f"{bucket}/{object_prefix}.zarr")
+            dest = f"{bucket}/{object_prefix}.zarr"
+            mapper = obj_store.get_mapper(dest)
             try:
+                # TODO: add check to verify if time_counter is present
                 ds.to_zarr(mapper, mode="a", append_dim=append_dim)
+                logging.info(f"Appended to {dest}")
             except ValueError:
                 ds.to_zarr(mapper, mode="w")
+                logging.info(f"Created {dest}")
