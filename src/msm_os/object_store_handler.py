@@ -259,8 +259,10 @@ def _send_data_to_store(
                 logging.info(f"Appending to {dest}")
 
                 # Handle files that have multiple values in the append dimension
-                for append_dim_value in ds_filepath[append_dim]:
-                    ds_filepath_part = ds_filepath.sel(**{append_dim: append_dim_value})
+                for app_dim_val in ds_filepath[append_dim]:
+                    ds_filepath_part = ds_filepath.sel(
+                        **{append_dim: slice(app_dim_val, app_dim_val, None)}
+                    )
                     try:
                         check_duplicates(ds_filepath_part, mapper, append_dim)
                         ds_filepath[var].to_zarr(
