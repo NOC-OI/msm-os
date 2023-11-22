@@ -258,13 +258,18 @@ def _send_data_to_store(
                 check_destination_exists(obj_store, dest)
                 logging.info(f"Appending to {dest}")
 
-                try:
-                    check_duplicates(ds_filepath, mapper, append_dim)
-                    ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
-                except DuplicatedAppendDimValue:
-                    logging.info(
-                        f"Skipping {dest} due to duplicate values in append dimension"
-                    )
+                # Handle files that have multiple values in the append dimension
+                for append_dim_value in ds_filepath[append_dim]:
+                    ds_filepath_part = ds_filepath.sel(**{append_dim: append_dim_value})
+                    try:
+                        check_duplicates(ds_filepath_part, mapper, append_dim)
+                        ds_filepath[var].to_zarr(
+                            mapper, mode="a", append_dim=append_dim
+                        )
+                    except DuplicatedAppendDimValue:
+                        logging.info(
+                            f"Skipping {dest} due to duplicate values in the append dimension"
+                        )
 
             except FileNotFoundError:
                 logging.info(f"Creating {dest}")
@@ -281,7 +286,7 @@ def _send_data_to_store(
                 ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
             except DuplicatedAppendDimValue:
                 logging.info(
-                    f"Skipping {dest} due to duplicate values in append dimension"
+                    f"Skipping {dest} due to duplicate values in the append dimension"
                 )
         except FileNotFoundError:
             logging.info(f"Creating {dest}")
