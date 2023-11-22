@@ -10,11 +10,11 @@ sources:
     driver:  zarr
     parameters:
       bucket:
-        default: "eorca025"
+        default: eorca025
         description: Bucket to load from.
         type: str
       var:
-        default: "e3t"
+        default: e3t
         description: Variable to load.
         type: str
       grid:
@@ -25,13 +25,13 @@ sources:
         - W
         - icemod
         - scalar
-        default: "T"
+        default: T
         description: options are "T", "U", "V", "W", "scalar", "icemod"
         type: str
       freq:
         allowed:
         - 1m
         - 1y
-        default: "1y"
+        default: 1y
         description: options are "1y", "1m"
         type: str
