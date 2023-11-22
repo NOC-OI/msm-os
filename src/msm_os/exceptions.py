@@ -19,5 +19,5 @@ class DuplicatedAppendDimValue(Exception):
         self.append_dim_value = append_dim_value
         super().__init__(
             f"Duplicated value '{self.append_dim_value}' found for the"
-            "append dimension '{self.append_dim}' in the dataset."
+            f" append dimension '{self.append_dim}' in the dataset."
         )
