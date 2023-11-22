@@ -25,7 +25,7 @@ mv eORCA025_1y_grid_T_1976-1976.nc eORCA025_1y_grid_T_1976-1976_old.nc
 mv eORCA025_1y_grid_T_1976-1976_new.nc eORCA025_1y_grid_T_1976-1976.nc
 ```
 
-### 3. Update the variable in the object store:**
+### 3. Update the variable in the object store
 
 Now use the `msm_os update` command to update the `e3t` variable in the object store. Provide the following parameters:
 
