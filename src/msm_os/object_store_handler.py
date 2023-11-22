@@ -23,7 +23,7 @@ def update(
     to_zarr_kwargs: dict | None = None,
 ) -> None:
     """
-    Update a region of of an object in an object store in Zarr format.
+    Update a region of a Zarr object in an object store.
 
     Parameters
     ----------
@@ -182,8 +182,6 @@ def send(
 
                 dest = f"{bucket}/{var}/{object_prefix}.zarr"
                 mapper = obj_store.get_mapper(dest)
-                print(type(mapper))
-                exit()
                 try:
                     check_destination_exists(obj_store, dest)
                     check_duplicates(ds_filepath, mapper, append_dim)
