@@ -258,14 +258,13 @@ def _send_data_to_store(
                 check_destination_exists(obj_store, dest)
                 logging.info(f"Appending to {dest}")
 
-                # Handle files that have multiple values in the append dimension
                 for app_dim_val in ds_filepath[append_dim]:
                     ds_filepath_part = ds_filepath.sel(
                         **{append_dim: slice(app_dim_val, app_dim_val, None)}
                     )
                     try:
                         check_duplicates(ds_filepath_part, mapper, append_dim)
-                        ds_filepath[var].to_zarr(
+                        ds_filepath_part[var].to_zarr(
                             mapper, mode="a", append_dim=append_dim
                         )
                     except DuplicatedAppendDimValue:
@@ -282,14 +281,21 @@ def _send_data_to_store(
 
         try:
             check_destination_exists(obj_store, dest)
-            try:
-                check_duplicates(ds_filepath, mapper, append_dim)
-                logging.info(f"Appending to {dest}")
-                ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
-            except DuplicatedAppendDimValue:
-                logging.info(
-                    f"Skipping {dest} due to duplicate values in the append dimension"
+            logging.info(f"Appending to {dest}")
+
+            for app_dim_val in ds_filepath[append_dim]:
+                ds_filepath_part = ds_filepath.sel(
+                    **{append_dim: slice(app_dim_val, app_dim_val, None)}
                 )
+
+                try:
+                    check_duplicates(ds_filepath_part, mapper, append_dim)
+                    ds_filepath_part.to_zarr(mapper, mode="a", append_dim=append_dim)
+                except DuplicatedAppendDimValue:
+                    logging.info(
+                        f"Skipping {dest} due to duplicate values in the append dimension"
+                    )
+
         except FileNotFoundError:
             logging.info(f"Creating {dest}")
             ds_filepath.to_zarr(mapper, mode="w")
