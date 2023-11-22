@@ -31,7 +31,7 @@ def initialise_logging():
     """Initialise logging configuration."""
     logging.basicConfig(
         stream=sys.stdout,
-        format="☁  msm_os ☁ | %(levelname)s | %(asctime)s | %(message)s",
+        format="☁  msm_os ☁  | %(levelname)10s | %(asctime)s | %(message)s",
         level=logging.INFO,
         datefmt="%Y-%m-%d %H:%M:%S",
     )
