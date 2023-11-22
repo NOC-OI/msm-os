@@ -32,7 +32,7 @@ def check_duplicates(
     filepath_time = ds_filepath[append_dim]
 
     if np.any(np.isin(filepath_time, ds_obj_store[append_dim])):
-        raise DuplicatedAppendDimValue(append_dim, filepath_time[0])
+        raise DuplicatedAppendDimValue(append_dim, filepath_time.values[0])
 
 
 def check_variable_exists(
