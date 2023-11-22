@@ -283,7 +283,7 @@ def _send_data_to_store(
                 logging.info(
                     f"Skipping {dest} due to duplicate append dimension values"
                 )
-        except ValueError:
+        except FileNotFoundError:
             logging.info(f"Creating {dest}")
             ds_filepath.to_zarr(mapper, mode="w")
 
