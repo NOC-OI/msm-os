@@ -6,6 +6,7 @@ from typing import Any, List, Optional
 import numpy as np
 import xarray as xr
 
+from .exceptions import DuplicatedAppendDimValue
 from .object_store import ObjectStoreS3
 from .sanity_cheks import (
     check_destination_exists,
@@ -251,10 +252,16 @@ def _send_data_to_store(
             mapper = obj_store.get_mapper(dest)
             try:
                 check_destination_exists(obj_store, dest)
-                check_duplicates(ds_filepath, mapper, append_dim)
-
                 logging.info(f"Appending to {dest}")
-                ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
+
+                try:
+                    check_duplicates(ds_filepath, mapper, append_dim)
+                    ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
+                except DuplicatedAppendDimValue:
+                    logging.info(
+                        f"Skipping {dest} due to duplicate append dimension values"
+                    )
+
             except FileNotFoundError:
                 logging.info(f"Creating {dest}")
                 ds_filepath[var].to_zarr(mapper, mode="w")
@@ -264,10 +271,14 @@ def _send_data_to_store(
 
         try:
             check_destination_exists(obj_store, dest)
-            check_duplicates(ds_filepath, mapper, append_dim)
-
-            logging.info(f"Appending to {dest}")
-            ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
+            try:
+                check_duplicates(ds_filepath, mapper, append_dim)
+                logging.info(f"Appending to {dest}")
+                ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
+            except DuplicatedAppendDimValue:
+                logging.info(
+                    f"Skipping {dest} due to duplicate append dimension values"
+                )
         except ValueError:
             logging.info(f"Creating {dest}")
             ds_filepath.to_zarr(mapper, mode="w")
