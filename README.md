@@ -1,5 +1,7 @@
 # msm-os package
 
+A library to streamline the transfer, update, and deletion of Zarr files within object store environments.
+
 ## Installation
 
 TODO.
@@ -8,17 +10,22 @@ TODO.
 
 ### Sending Files
 
-To send a file to the Object Store, use the following command:
+To send a file to an object store, use the following command:
 
 ```bash
 msm_os send -f eORCA025_1y_grid_T_1976-1976.nc -c credentials.json -b eorca025
 ```
+The flags used are the following:
+- `-f`: The path to the NetCDF file containing the variables.
+- `-c`: The path to the JSON file containing the object store credentials.
+- `-b`: The bucket name in the object store where the variables will be stored.
 
-Since no `--prefix` is provided, the variables will be stored in `eorca025/<var>/eORCA025_1y_grid_T.zarr`.
+Since no `--prefix` is provided, the variables will be stored in `eorca025/T1y/<var>.zarr`. If a `--prefix` is provided, the variables will be stored in `eorca025/<prefix>/<var>.zarr`.
+
 
 ### Updating or Replacing Files
 
-To update the values of an existing variable, use the following command:
+To update the values of an existing variable in an object store, use the following command:
 
 ```bash
 msm_os update -f eORCA025_1y_grid_T_1976-1976.nc -c credentials.json -b eorca025 -v e3t
@@ -26,7 +33,13 @@ msm_os update -f eORCA025_1y_grid_T_1976-1976.nc -c credentials.json -b eorca025
 
 This will locate the region with the same timestamp as given by `eORCA025_1y_grid_T_1976-1976.nc` and overwrite the values of `e3t` in the object store.
 
-## Required Flags
+An additional flag is used in this case:
+
+- `-v`: The name of the variable to update.
+
+## Flags
+
+### Mandatory Flags
 
 | Long version | Short Version | Description |
 |---|---|---|
@@ -35,7 +48,7 @@ This will locate the region with the same timestamp as given by `eORCA025_1y_gri
 | `--credentials` | `-c` | Path to the JSON file containing the credentials for the object store. |
 | `--bucket` | `-b` | Bucket name. |
 
-## Flag Descriptions
+### Optional flags
 
 | Flag | Short Version | Description |
 |---|---|---|
