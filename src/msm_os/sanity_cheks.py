@@ -29,13 +29,9 @@ def check_duplicates(
         If duplicates are found in the append dimension.
     """
     ds_obj_store = xr.open_zarr(mapper)
-    filepath_time = ds_filepath[append_dim].values
-    index = np.where(
-        np.abs(ds_obj_store[append_dim].values - filepath_time)
-        < np.timedelta64(1, "ns")
-    )[0]
+    filepath_time = ds_filepath[append_dim]
 
-    if len(index) > 0:
+    if np.any(np.isin(filepath_time, ds_obj_store[append_dim])):
         raise DuplicatedAppendDimValue(append_dim, filepath_time[0])
 
 

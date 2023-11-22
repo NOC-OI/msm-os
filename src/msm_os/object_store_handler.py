@@ -20,6 +20,7 @@ def update(
     bucket: str,
     store_credentials_json: str,
     variables: Optional[List[str]] = None,
+    append_dim: str = "time_counter",
     object_prefix: Optional[str] = None,
     to_zarr_kwargs: Optional[dict] = None,
 ) -> None:
@@ -36,6 +37,8 @@ def update(
         Path to the JSON file containing the object store credentials.
     variables
         List of variables to be updated. If None, all variables will be updated, by default None.
+    append_dim
+        Name of the append dimension, by default "time_counter".
     object_prefix :
         Prefix to be added to the object names in the object store, by default None.
     to_zarr_kwargs
@@ -62,7 +65,7 @@ def update(
             ds_obj_store = xr.open_zarr(mapper)
             check_variable_exists(ds_obj_store, var)
 
-            _update_data(ds_filepath, ds_obj_store, var, mapper)
+            _update_data(ds_filepath, ds_obj_store, var, append_dim, mapper)
 
 
 def send(
@@ -174,7 +177,11 @@ def _get_update_variables(ds_filepath: xr.Dataset, variables: List[str]) -> List
 
 
 def _update_data(
-    ds_filepath: xr.Dataset, ds_obj_store: xr.Dataset, var: str, mapper: Any
+    ds_filepath: xr.Dataset,
+    ds_obj_store: xr.Dataset,
+    var: str,
+    append_dim: str,
+    mapper: Any,
 ) -> None:
     """
     Update the data in the object store.
@@ -187,34 +194,37 @@ def _update_data(
         Dataset in the object store.
     var
         Variable to be updated.
+    append_dim
+        Name of the append dimension.
     mapper
         Object store mapper.
     """
     logging.info(f"Updating {mapper.root}")
 
-    filepath_time = ds_filepath.time_counter.values
-    index = np.where(
-        np.abs(ds_obj_store.time_counter.values - filepath_time)
-        < np.timedelta64(1, "ns")
-    )[0]
+    for app_dim_val in ds_filepath[append_dim]:
+        filepath_time = ds_filepath[append_dim].values
+        index = np.where(
+            np.abs(ds_obj_store[append_dim].values - app_dim_val)
+            < np.timedelta64(1, "ns")
+        )[0]
 
-    if len(index) == 0:
-        raise ValueError(
-            f"No matching time_counter found for {filepath_time[0]} of {ds_filepath}"
-        )
+        if len(index) == 0:
+            raise ValueError(
+                f"No matching time_counter found for {filepath_time[0]} of {ds_filepath}"
+            )
 
-    index = int(index[0])
-    region = {"time_counter": slice(index, index + 1, None)}
+        index = int(index[0])
+        region = {append_dim: slice(index, index + 1, None)}
 
-    vars_to_drop = [
-        var
-        for var in ds_filepath.variables
-        if not any(dim in region.keys() for dim in ds_filepath[var].dims)
-    ]
-    ds_filepath = ds_filepath.drop_vars(vars_to_drop)
+        vars_to_drop = [
+            var
+            for var in ds_filepath.variables
+            if not any(dim in region.keys() for dim in ds_filepath[var].dims)
+        ]
+        ds_filepath = ds_filepath.drop_vars(vars_to_drop)
 
-    ds_filepath[var].to_zarr(mapper, mode="r+", region=region)
-    logging.info(f"Updated {mapper.root} at {filepath_time[0]}")
+        ds_filepath[var].to_zarr(mapper, mode="r+", region=region)
+        logging.info(f"Updated {mapper.root} at {filepath_time[0]}")
 
 
 def _send_data_to_store(
@@ -258,19 +268,23 @@ def _send_data_to_store(
                 check_destination_exists(obj_store, dest)
                 logging.info(f"Appending to {dest}")
 
-                for app_dim_val in ds_filepath[append_dim]:
-                    ds_filepath_part = ds_filepath.sel(
-                        **{append_dim: slice(app_dim_val, app_dim_val, None)}
-                    )
-                    try:
-                        check_duplicates(ds_filepath_part, mapper, append_dim)
-                        ds_filepath_part[var].to_zarr(
-                            mapper, mode="a", append_dim=append_dim
+                try:
+                    check_duplicates(ds_filepath, mapper, append_dim)
+                    ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
+                except DuplicatedAppendDimValue:
+                    for app_dim_val in ds_filepath[append_dim]:
+                        ds_filepath_part = ds_filepath.sel(
+                            **{append_dim: slice(app_dim_val, app_dim_val, None)}
                         )
-                    except DuplicatedAppendDimValue:
-                        logging.info(
-                            f"Skipping {dest} due to duplicate values in the append dimension"
-                        )
+                        try:
+                            check_duplicates(ds_filepath_part, mapper, append_dim)
+                            ds_filepath_part[var].to_zarr(
+                                mapper, mode="a", append_dim=append_dim
+                            )
+                        except DuplicatedAppendDimValue:
+                            logging.info(
+                                f"Skipping {dest} due to duplicate values in the append dimension"
+                            )
 
             except FileNotFoundError:
                 logging.info(f"Creating {dest}")
@@ -283,18 +297,23 @@ def _send_data_to_store(
             check_destination_exists(obj_store, dest)
             logging.info(f"Appending to {dest}")
 
-            for app_dim_val in ds_filepath[append_dim]:
-                ds_filepath_part = ds_filepath.sel(
-                    **{append_dim: slice(app_dim_val, app_dim_val, None)}
-                )
-
-                try:
-                    check_duplicates(ds_filepath_part, mapper, append_dim)
-                    ds_filepath_part.to_zarr(mapper, mode="a", append_dim=append_dim)
-                except DuplicatedAppendDimValue:
-                    logging.info(
-                        f"Skipping {dest} due to duplicate values in the append dimension"
+            try:
+                check_duplicates(ds_filepath, mapper, append_dim)
+                ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
+            except DuplicatedAppendDimValue:
+                for app_dim_val in ds_filepath[append_dim]:
+                    ds_filepath_part = ds_filepath.sel(
+                        **{append_dim: slice(app_dim_val, app_dim_val, None)}
                     )
+                    try:
+                        check_duplicates(ds_filepath_part, mapper, append_dim)
+                        ds_filepath_part.to_zarr(
+                            mapper, mode="a", append_dim=append_dim
+                        )
+                    except DuplicatedAppendDimValue:
+                        logging.info(
+                            f"Skipping {dest} due to duplicate values in the append dimension"
+                        )
 
         except FileNotFoundError:
             logging.info(f"Creating {dest}")
