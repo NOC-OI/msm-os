@@ -3,7 +3,10 @@
 # Originally created by:
 #   - Joao Morado (22/11/2023)
 # Modified by:
-#   -
+#   - 32677
+
+# Usage:
+# [nohup] ./send_batch.sh > send_batch.output 2> send_batch.errors
 
 # User inputs
 CREDENTIALS=/home/joamor/obj_store_workspace/jasmin_credentials.json
