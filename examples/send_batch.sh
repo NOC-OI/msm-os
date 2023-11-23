@@ -12,7 +12,7 @@
 CREDENTIALS=/home/joamor/obj_store_workspace/jasmin_credentials.json
 BUCKET=msm-eorca025-era5
 GLOB_EXPR=/dssgfs01/scratch/atb299/NOC_NPD/simulations/eORCA025_ERA5/*/*.nc
-MSM_OS_OUPUT=output_noc_os
+MSM_OS_OUPUT=noc_os
 
 # ----------------------------------------------------------------------------- #
 #                                                                               #
@@ -42,7 +42,7 @@ for file in $file_list; do
     echo -ne ">] $percentage% \r"
 
     echo -e "Sending ${file}"
-    msm_os send -f ${file} -c ${CREDENTIALS} -b ${BUCKET} >> ${MSM_OS_OUPUT}
+    msm_os send -f ${file} -c ${CREDENTIALS} -b ${BUCKET} >> ${MSM_OS_OUPUT}.output 2>> ${MSM_OS_OUPUT}.errors
 done
 
 echo -e "\nTransfer completed!"
