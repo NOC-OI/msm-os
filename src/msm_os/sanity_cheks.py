@@ -29,10 +29,29 @@ def check_duplicates(
         If duplicates are found in the append dimension.
     """
     ds_obj_store = xr.open_zarr(mapper)
-    filepath_time = ds_filepath[append_dim]
+    filepath_append_dim = ds_filepath[append_dim]
 
-    if np.any(np.isin(filepath_time, ds_obj_store[append_dim])):
-        raise DuplicatedAppendDimValue(append_dim, filepath_time.values[0])
+    # Number of duplicates in the append dimension
+    n_dupl = np.sum(np.isin(filepath_append_dim, ds_obj_store[append_dim]))
+
+    if n_dupl == 0:
+        return
+    elif n_dupl == filepath_append_dim.size:
+        raise DuplicatedAppendDimValue(
+            n_dupl,
+            append_dim,
+            filepath_append_dim.values[0],
+            filepath_append_dim.values[-1],
+        )
+    elif n_dupl > 0:
+        raise ValueError(
+            f"Only found {n_dupl} duplicates in the append dimension when "
+            f"there are {filepath_append_dim.size} values in the dataset."
+        )
+    else:
+        raise NotImplementedError(
+            "Found error in check_duplicates which is not implemented."
+        )
 
 
 def check_variable_exists(
