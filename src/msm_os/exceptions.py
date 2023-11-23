@@ -17,9 +17,11 @@ class DuplicatedAppendDimValue(Exception):
 
     def __init__(self, n_dupl, append_dim, first_dupl_value, last_dupl_value):
         """Initialise the exception."""
-        message = (
+        msg_general = (
             f"Found {n_dupl} duplicates in the append dimension '{append_dim}'.\n"
-            f"Range: {first_dupl_value}--{last_dupl_value}."
         )
-        logging.warning(message)
+        msg_specific = f"Range: {first_dupl_value}--{last_dupl_value}."
+        logging.warning(msg_general)
+        logging.warning(msg_specific)
+        message = msg_general + msg_specific
         super().__init__(message)
