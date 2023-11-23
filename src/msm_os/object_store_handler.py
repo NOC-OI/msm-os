@@ -200,7 +200,6 @@ def _update_data(
         Object store mapper.
     """
     logging.info(f"Updating {mapper.root}")
-    ds_obj_store = xr.open_zarr(mapper)
 
     try:
         check_duplicates(ds_filepath, ds_obj_store, append_dim)
