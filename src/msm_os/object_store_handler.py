@@ -201,11 +201,11 @@ def _update_data(
     mapper
         Object store mapper.
     """
-    logging.info(f"Updating {mapper.root}")
 
     try:
         check_duplicates(ds_filepath, ds_obj_store, append_dim)
     except DuplicatedAppendDimValue:
+        logging.info(f"Updating {mapper.root}")
         # Define region to write to
         dupl = np.where(np.isin(ds_obj_store[append_dim], ds_filepath[append_dim]))
         dupl_max = np.max(dupl) + 1
@@ -221,6 +221,10 @@ def _update_data(
         ds_filepath = ds_filepath.drop_vars(vars_to_drop)
         ds_filepath[var].to_zarr(mapper, mode="r+", region=region)
         logging.info(f"Updated {mapper.root}")
+
+        return
+
+    logging.info(f"Skipping {mapper.root} because region not found in object store")
 
 
 def _send_data_to_store(
@@ -262,13 +266,14 @@ def _send_data_to_store(
             mapper = obj_store.get_mapper(dest)
             try:
                 check_destination_exists(obj_store, dest)
-                logging.info(f"Appending to {dest} along the {append_dim} dimension")
 
                 if append_dim not in ds_filepath[var].dims:
                     logging.info(
                         f"Skipping {dest} because {append_dim} is not in the dimensions of {var}"
                     )
                     continue
+
+                logging.info(f"Appending to {dest} along the {append_dim} dimension")
 
                 try:
                     ds_obj_store = xr.open_zarr(mapper)
