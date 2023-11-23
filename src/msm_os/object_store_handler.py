@@ -259,12 +259,12 @@ def _send_data_to_store(
 
             dest = f"{bucket}/{object_prefix}/{var}.zarr"
             mapper = obj_store.get_mapper(dest)
-            ds_obj_store = xr.open_zarr(mapper)
             try:
                 check_destination_exists(obj_store, dest)
                 logging.info(f"Appending to {dest}")
 
                 try:
+                    ds_obj_store = xr.open_zarr(mapper)
                     check_duplicates(ds_filepath, ds_obj_store, append_dim)
                     ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
                 except DuplicatedAppendDimValue:
@@ -278,13 +278,13 @@ def _send_data_to_store(
     else:
         dest = f"{bucket}/{object_prefix}.zarr"
         mapper = obj_store.get_mapper(dest)
-        ds_obj_store = xr.open_zarr(mapper)
 
         try:
             check_destination_exists(obj_store, dest)
             logging.info(f"Appending to {dest}")
 
             try:
+                ds_obj_store = xr.open_zarr(mapper)
                 check_duplicates(ds_filepath, ds_obj_store, append_dim)
                 ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
             except DuplicatedAppendDimValue:
