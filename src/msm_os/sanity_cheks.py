@@ -8,7 +8,7 @@ from .exceptions import DuplicatedAppendDimValue, VariableNotFound
 
 def check_duplicates(
     ds_filepath: xr.Dataset,
-    mapper: FSMap,
+    ds_obj_store: xr.Dataset,
     append_dim: str,
 ) -> None:
     """
@@ -18,8 +18,8 @@ def check_duplicates(
     ----------
     ds_filepath
         Local dataset to be sent.
-    mapper
-        The mapper for opening the remote Zarr store.
+    ds_obj_store
+        Dataset in the object store.
     append_dim
         The name of the dimension to check for duplicates.
 
@@ -28,14 +28,13 @@ def check_duplicates(
     DuplicatedAppendDimValue
         If duplicates are found in the append dimension.
     """
-    ds_obj_store = xr.open_zarr(mapper)
     filepath_append_dim = ds_filepath[append_dim]
 
     # Number of duplicates in the append dimension
-    n_dupl = np.sum(np.isin(filepath_append_dim, ds_obj_store[append_dim]))
+    n_dupl = np.sum(np.isin(ds_obj_store[append_dim], filepath_append_dim))
 
     if n_dupl == 0:
-        return
+        return n_dupl
     elif n_dupl == filepath_append_dim.size:
         raise DuplicatedAppendDimValue(
             n_dupl,
