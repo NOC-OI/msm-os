@@ -200,31 +200,26 @@ def _update_data(
         Object store mapper.
     """
     logging.info(f"Updating {mapper.root}")
+    ds_obj_store = xr.open_zarr(mapper)
 
-    for app_dim_val in ds_filepath[append_dim]:
-        filepath_time = ds_filepath[append_dim].values
-        index = np.where(
-            np.abs(ds_obj_store[append_dim].values - app_dim_val)
-            < np.timedelta64(1, "ns")
-        )[0]
+    try:
+        check_duplicates(ds_filepath, ds_obj_store, append_dim)
+    except DuplicatedAppendDimValue:
+        # Define region to write to
+        dupl = np.where(np.isin(ds_obj_store[append_dim], ds_filepath[append_dim]))
+        dupl_max = np.max(dupl) + 1
+        dupl_min = np.min(dupl)
+        region = {append_dim: slice(dupl_min, dupl_max, None)}
 
-        if len(index) == 0:
-            raise ValueError(
-                f"No matching time_counter found for {filepath_time[0]} of {ds_filepath}"
-            )
-
-        index = int(index[0])
-        region = {append_dim: slice(index, index + 1, None)}
-
+        # Write to zarr
         vars_to_drop = [
             var
             for var in ds_filepath.variables
             if not any(dim in region.keys() for dim in ds_filepath[var].dims)
         ]
         ds_filepath = ds_filepath.drop_vars(vars_to_drop)
-
         ds_filepath[var].to_zarr(mapper, mode="r+", region=region)
-        logging.info(f"Updated {mapper.root} at {filepath_time[0]}")
+        logging.info(f"Updated {mapper.root}")
 
 
 def _send_data_to_store(
@@ -264,27 +259,18 @@ def _send_data_to_store(
 
             dest = f"{bucket}/{object_prefix}/{var}.zarr"
             mapper = obj_store.get_mapper(dest)
+            ds_obj_store = xr.open_zarr(mapper)
             try:
                 check_destination_exists(obj_store, dest)
                 logging.info(f"Appending to {dest}")
 
                 try:
-                    check_duplicates(ds_filepath, mapper, append_dim)
+                    check_duplicates(ds_filepath, ds_obj_store, append_dim)
                     ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
                 except DuplicatedAppendDimValue:
-                    for app_dim_val in ds_filepath[append_dim]:
-                        ds_filepath_part = ds_filepath.sel(
-                            **{append_dim: slice(app_dim_val, app_dim_val, None)}
-                        )
-                        try:
-                            check_duplicates(ds_filepath_part, mapper, append_dim)
-                            ds_filepath_part[var].to_zarr(
-                                mapper, mode="a", append_dim=append_dim
-                            )
-                        except DuplicatedAppendDimValue:
-                            logging.info(
-                                f"Skipping {dest} due to duplicate values in the append dimension"
-                            )
+                    logging.info(
+                        f"Skipping {dest} due to duplicate values in the append dimension"
+                    )
 
             except FileNotFoundError:
                 logging.info(f"Creating {dest}")
@@ -292,28 +278,19 @@ def _send_data_to_store(
     else:
         dest = f"{bucket}/{object_prefix}.zarr"
         mapper = obj_store.get_mapper(dest)
+        ds_obj_store = xr.open_zarr(mapper)
 
         try:
             check_destination_exists(obj_store, dest)
             logging.info(f"Appending to {dest}")
 
             try:
-                check_duplicates(ds_filepath, mapper, append_dim)
+                check_duplicates(ds_filepath, ds_obj_store, append_dim)
                 ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
             except DuplicatedAppendDimValue:
-                for app_dim_val in ds_filepath[append_dim]:
-                    ds_filepath_part = ds_filepath.sel(
-                        **{append_dim: slice(app_dim_val, app_dim_val, None)}
-                    )
-                    try:
-                        check_duplicates(ds_filepath_part, mapper, append_dim)
-                        ds_filepath_part.to_zarr(
-                            mapper, mode="a", append_dim=append_dim
-                        )
-                    except DuplicatedAppendDimValue:
-                        logging.info(
-                            f"Skipping {dest} due to duplicate values in the append dimension"
-                        )
+                logging.info(
+                    f"Skipping {dest} due to duplicate values in the append dimension"
+                )
 
         except FileNotFoundError:
             logging.info(f"Creating {dest}")
