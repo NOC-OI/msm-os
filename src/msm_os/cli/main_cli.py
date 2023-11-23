@@ -46,7 +46,10 @@ def process_action(args):
     variables = list(args.variables) if args.variables is not None else None
 
     if args.action == "send":
-        send_vars_indep = "compact" in args.variables
+        if args.variables is not None and "compact" in args.variables:
+            send_vars_indep = True
+        else:
+            send_vars_indep = False
 
         send(
             filepaths=list(args.filepaths),
