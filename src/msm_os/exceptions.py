@@ -6,7 +6,7 @@ class VariableNotFound(Exception):
     """Exception raised for when a variable is not found in the dataset."""
 
     def __init__(self, variable_name):
-        """Initialize the exception."""
+        """Initialise the exception."""
         message = f"Variable '{variable_name}' not found in the dataset."
         logging.warning(message)
         super().__init__(message)
@@ -15,11 +15,11 @@ class VariableNotFound(Exception):
 class DuplicatedAppendDimValue(Exception):
     """Exception raised for when a duplicated value is found in the append dim."""
 
-    def __init__(self, append_dim, append_dim_value):
-        """Initialize the exception."""
+    def __init__(self, n_dupl, append_dim, first_dupl_value, last_dupl_value):
+        """Initialise the exception."""
         message = (
-            f"Duplicate value '{append_dim_value}' found for the "
-            f"append dimension '{append_dim}' in the dataset."
+            f"Found {n_dupl} duplicates in the append dimension '{append_dim}'. "
+            f"Range: {first_dupl_value}--{last_dupl_value}."
         )
         logging.warning(message)
         super().__init__(message)
