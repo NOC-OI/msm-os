@@ -50,6 +50,7 @@ def update(
     check_destination_exists(obj_store, bucket)
 
     for filepath in filepaths:
+        logging.info(f"Updating using {filepath}...")
         object_prefix = _get_object_prefix(filepath, object_prefix)
 
         ds_filepath = xr.open_dataset(filepath)
@@ -109,6 +110,7 @@ def send(
         obj_store.create_bucket(bucket)
 
     for filepath in filepaths:
+        logging.info(f"Sending {filepath}...")
         ds_filepath = xr.open_dataset(filepath)
         object_prefix = _get_object_prefix(filepath, object_prefix)
 
