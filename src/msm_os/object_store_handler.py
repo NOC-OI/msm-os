@@ -50,7 +50,7 @@ def update(
     check_destination_exists(obj_store, bucket)
 
     for filepath in filepaths:
-        logging.info(f"Updating using {filepath}...")
+        logging.info(f"Updating using {filepath}")
         object_prefix = _get_object_prefix(filepath, object_prefix)
 
         ds_filepath = xr.open_dataset(filepath)
@@ -110,7 +110,7 @@ def send(
         obj_store.create_bucket(bucket)
 
     for filepath in filepaths:
-        logging.info(f"Sending {filepath}...")
+        logging.info(f"Sending {filepath}")
         ds_filepath = xr.open_dataset(filepath)
         object_prefix = _get_object_prefix(filepath, object_prefix)
 
@@ -262,7 +262,13 @@ def _send_data_to_store(
             mapper = obj_store.get_mapper(dest)
             try:
                 check_destination_exists(obj_store, dest)
-                logging.info(f"Appending to {dest}")
+                logging.info(f"Appending to {dest} along the {append_dim} dimension")
+
+                if append_dim not in ds_filepath[var].dims:
+                    logging.info(
+                        f"Skipping {dest} because {append_dim} is not in the dimensions of {var}"
+                    )
+                    continue
 
                 try:
                     ds_obj_store = xr.open_zarr(mapper)
@@ -282,7 +288,7 @@ def _send_data_to_store(
 
         try:
             check_destination_exists(obj_store, dest)
-            logging.info(f"Appending to {dest}")
+            logging.info(f"Appending to {dest} along the {append_dim} dimension")
 
             try:
                 ds_obj_store = xr.open_zarr(mapper)
