@@ -14,6 +14,13 @@ from .sanity_cheks import (
     check_variable_exists,
 )
 
+try:
+    from dask.distributed import Client
+except ImportError:
+    logging.warning(
+        "Dask is not installed. Please install it to use parallel features."
+    )
+
 
 def update(
     filepaths: List[str],
@@ -77,6 +84,7 @@ def send(
     send_vars_indep: bool = True,
     append_dim: str = "time_counter",
     object_prefix: Optional[str] = None,
+    client: Optional[Client] = None,
     to_zarr_kwargs: Optional[dict] = None,
 ) -> None:
     """
@@ -98,6 +106,8 @@ def send(
         Name of the append dimension, by default "time_counter".
     object_prefix
         Prefix to be added to the object names in the object store, by default None.
+    client
+        Dask client, by default None.
     to_zarr_kwargs
         Additional keyword arguments passed to xr.Dataset.to_zarr(), by default None.
     """
@@ -111,7 +121,7 @@ def send(
 
     for filepath in filepaths:
         logging.info(f"Sending {filepath}")
-        ds_filepath = xr.open_dataset(filepath)
+        ds_filepath = xr.open_dataset(filepath, chunks="auto")
         object_prefix = _get_object_prefix(filepath, object_prefix)
 
         _send_data_to_store(
@@ -122,6 +132,8 @@ def send(
             variables,
             append_dim,
             send_vars_indep,
+            client,
+            to_zarr_kwargs,
         )
 
 
@@ -227,14 +239,71 @@ def _update_data(
     logging.info(f"Skipping {mapper.root} because region not found in object store")
 
 
+def _send_variable(
+    ds_filepath: xr.Dataset,
+    obj_store: ObjectStoreS3,
+    var: str,
+    bucket: str,
+    object_prefix: str,
+    append_dim: str,
+) -> None:
+    """
+    Send a single variable to the object store.
+
+    Parameters
+    ----------
+    ds_filepath
+        Filepath to the local dataset.
+    obj_store
+        Object store.
+    var
+        Variable to be sent.
+    bucket
+        Name of the bucket in the object store.
+    object_prefix
+        Prefix to be added to the object names in the object store.
+    append_dim
+        Name of the append dimension.
+    """
+    check_variable_exists(ds_filepath, var)
+
+    dest = f"{bucket}/{object_prefix}/{var}.zarr"
+    mapper = obj_store.get_mapper(dest)
+    try:
+        check_destination_exists(obj_store, dest)
+
+        if append_dim not in ds_filepath[var].dims:
+            logging.info(
+                f"Skipping {dest} because {append_dim} is not in the dimensions of {var}"
+            )
+            return
+
+        logging.info(f"Appending to {dest} along the {append_dim} dimension")
+
+        try:
+            ds_obj_store = xr.open_zarr(mapper)
+            check_duplicates(ds_filepath, ds_obj_store, append_dim)
+            ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
+        except DuplicatedAppendDimValue:
+            logging.info(
+                f"Skipping {dest} due to duplicate values in the append dimension"
+            )
+
+    except FileNotFoundError:
+        logging.info(f"Creating {dest}")
+        ds_filepath[var].to_zarr(mapper, mode="w")
+
+
 def _send_data_to_store(
     obj_store: ObjectStoreS3,
     bucket: str,
     ds_filepath: xr.Dataset,
-    object_prefix: Optional[str],
-    variables: Optional[List[str]],
+    object_prefix: str,
+    variables: List[str],
     append_dim: str,
     send_vars_indep: bool,
+    client: Client,
+    to_zarr_kwargs: dict,
 ) -> None:
     """
     Send data to the object store.
@@ -255,38 +324,36 @@ def _send_data_to_store(
         Name of the append dimension.
     send_vars_indep
         Whether to send variables as separate objects.
+    client
+        Dask client.
+    to_zarr_kwargs
+        Additional keyword arguments passed to xr.Dataset.to_zarr().
     """
+    # See https://stackoverflow.com/questions/66769922/concurrently-write-xarray-datasets-to-zarr-how-to-efficiently-scale-with-dask
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
 
-        for var in variables:
-            check_variable_exists(ds_filepath, var)
-
-            dest = f"{bucket}/{object_prefix}/{var}.zarr"
-            mapper = obj_store.get_mapper(dest)
-            try:
-                check_destination_exists(obj_store, dest)
-
-                if append_dim not in ds_filepath[var].dims:
-                    logging.info(
-                        f"Skipping {dest} because {append_dim} is not in the dimensions of {var}"
+        if client:
+            futures = []
+            for var in variables:
+                futures.append(
+                    client.submit(
+                        _send_variable,
+                        ds_filepath,
+                        obj_store,
+                        var,
+                        bucket,
+                        object_prefix,
+                        append_dim,
                     )
-                    continue
+                )
+            client.gather(futures)
+        else:
+            for var in variables:
+                _send_variable(
+                    ds_filepath, obj_store, var, bucket, object_prefix, append_dim
+                )
 
-                logging.info(f"Appending to {dest} along the {append_dim} dimension")
-
-                try:
-                    ds_obj_store = xr.open_zarr(mapper)
-                    check_duplicates(ds_filepath, ds_obj_store, append_dim)
-                    ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
-                except DuplicatedAppendDimValue:
-                    logging.info(
-                        f"Skipping {dest} due to duplicate values in the append dimension"
-                    )
-
-            except FileNotFoundError:
-                logging.info(f"Creating {dest}")
-                ds_filepath[var].to_zarr(mapper, mode="w")
     else:
         dest = f"{bucket}/{object_prefix}.zarr"
         mapper = obj_store.get_mapper(dest)
