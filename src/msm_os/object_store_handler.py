@@ -122,13 +122,13 @@ def send(
     for filepath in filepaths:
         logging.info(f"Sending {filepath}")
         ds_filepath = xr.open_dataset(filepath, chunks="auto")
-        object_prefix = _get_object_prefix(filepath, object_prefix)
+        prefix = _get_object_prefix(filepath, object_prefix)
 
         _send_data_to_store(
             obj_store,
             bucket,
             ds_filepath,
-            object_prefix,
+            prefix,
             variables,
             append_dim,
             send_vars_indep,
