@@ -22,12 +22,12 @@ sources:
         - icemod
         - scalar
         default: "grid_t"
-        description: options are "grid_t", "grid_u", "grid_v", "grid_w", "scalar", "icemod"
+        description: Options are "grid_t", "grid_u", "grid_v", "grid_w", "scalar", "icemod"
         type: str
       frequency:
         allowed:
         - m
         - y
         default: "y"
-        description: options are "y" or "m"
+        description: Options are "y" or "m"
         type: str
