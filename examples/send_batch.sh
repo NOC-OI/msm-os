@@ -11,7 +11,7 @@
 # User inputs
 CREDENTIALS=/home/joamor/obj_store_workspace/jasmin_credentials.json
 BUCKET=msm-eorca025-era5
-GLOB_EXPR=/dssgfs01/scratch/atb299/NOC_NPD/simulations/eORCA025_ERA5/*/*.nc
+GLOB_EXPR=/dssgfs01/scratch/atb299/NOC_NPD/simulations/eORCA025_ERA5/*/
 MSM_OS_OUPUT=noc_os
 
 # ----------------------------------------------------------------------------- #
@@ -19,12 +19,12 @@ MSM_OS_OUPUT=noc_os
 #                   Send a batch of files to the object store                   #
 #                                                                               #
 # ----------------------------------------------------------------------------- #
-
 # Get file list
-file_list=$(printf '%s\n' $GLOB_EXPR 2>/dev/null)
+file_list=$(find $GLOB_EXPR -maxdepth 2 -type f -name "*.nc" | sort)
 
-if [ ! -n "$file_list" ]; then
-    echo "No .nc files found."
+# Check if OUTPUT directory exists and that it contains NetCDF files
+if [ ! -d "OUTPUT" ] || [ ! -z "${file_list}" ]; then
+    echo "Error: No .nc files found in OUTPUT directory or OUTPUT directory does not exist."
     exit 1
 fi
 
