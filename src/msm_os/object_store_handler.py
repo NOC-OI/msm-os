@@ -9,6 +9,7 @@ import xarray as xr
 from .exceptions import DuplicatedAppendDimValue
 from .object_store import ObjectStoreS3
 from .sanity_cheks import (
+    calculate_checksum_chunkwise,
     check_destination_exists,
     check_duplicates,
     check_variable_exists,
@@ -20,6 +21,50 @@ except ImportError:
     logging.warning(
         "Dask is not installed. Please install it to use parallel features."
     )
+
+
+
+def check_data_integrity(
+    bucket: str,
+    test_list: str,
+    store_credentials_json: str,
+    variables: Optional[List[str]] = None,
+    object_prefix: Optional[str] = None,
+) -> None:
+    """
+    
+    Update/replace the object store with new data.
+
+    Parameters
+    ----------
+    bucket
+        Name of the bucket in the object store.
+    test_list
+        List of integrity tests to be performed.
+    store_credentials_json
+        Path to the JSON file containing the object store credentials.
+    variables
+        List of variables to be updated. If None, all variables will be updated, by default None.
+    object_prefix :
+        Prefix to be added to the object names in the object store, by default None.
+    """
+
+    obj_store = ObjectStoreS3(anon=False, store_credentials_json=store_credentials_json)
+    check_destination_exists(obj_store, bucket)
+
+    for var in variables:
+        dest = f"{bucket}/{object_prefix}/{var}.zarr"
+
+        mapper = obj_store.get_mapper(dest)
+        ds_obj_store = xr.open_zarr(mapper)
+        check_variable_exists(ds_obj_store, var)
+        for test in test_list:
+            logging.info(f"Checking data integrity using {test}")
+            if test == "checksum":
+                check_checksum(ds_obj_store, var)
+            if test == 'metadata':
+                #TODO: Implement metadata check
+                pass
 
 
 def update(
@@ -122,6 +167,7 @@ def send(
     for filepath in filepaths:
         logging.info(f"Sending {filepath}")
         ds_filepath = xr.open_dataset(filepath, chunks="auto")
+        
         prefix = _get_object_prefix(filepath, object_prefix)
 
         _send_data_to_store(
@@ -283,7 +329,13 @@ def _send_variable(
         try:
             ds_obj_store = xr.open_zarr(mapper)
             check_duplicates(ds_filepath, ds_obj_store, append_dim)
+            # Calculate checksum for the variable
+            local_check_sum = calculate_checksum_chunkwise(ds_filepath[var])
+            var_obj_store_checksum = ds_obj_store.attrs.get(f"{var}_checksum", "")
             ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
+            # Save the checksum as an attribute
+            with xr.open_zarr(mapper, mode="a") as ds:
+                ds.attrs[f"{var}_checksum"] = local_check_sum + var_obj_store_checksum
         except DuplicatedAppendDimValue:
             logging.info(
                 f"Skipping {dest} due to duplicate values in the append dimension"
