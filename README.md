@@ -41,17 +41,16 @@ An additional flag is used in this case:
 ### Check data integrity
 
 1. Implementing Data Integrity Checks
-pre-upload check
-checksum
-versioning
-metadata validation
-
+- pre-upload check
+- checksum
+- versioning
+- metadata validation
 
 2. Correcting Inconsistent Metadata
-create a repair tool
-retry logic
-manual check
-post upload checking
+- create a repair tool
+- retry logic
+- manual check
+- post upload checking
 
 ## Flags
 
