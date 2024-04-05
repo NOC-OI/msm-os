@@ -103,6 +103,33 @@ class ObjectStoreS3(s3fs.S3FileSystem):
 
         return store_credentials
 
+
+    def get_signed_url(
+        self,
+        bucket: str,
+        object_name: str,
+        expiration: int = 3600) -> str:
+        """
+        Get a signed URL to access an object in the object store.
+
+        Parameters
+        ----------
+        bucket (str):
+            Bucket name.
+        object_name (str):
+            Object name.
+        expiration (int, optional):
+            Expiration time in seconds. Defaults to 3600.
+
+        Returns
+        -------
+        signed_url
+            Signed URL to access the object in the object store.
+        """
+
+        signed_url = self.url(bucket + '/' + object_name, expires=expiration)
+        return signed_url
+
     def create_bucket(self, bucket: str, **kwargs) -> None:
         """
         Create a bucket in the object store.

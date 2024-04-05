@@ -11,7 +11,6 @@ class VariableNotFound(Exception):
         logging.warning(message)
         super().__init__(message)
 
-
 class DuplicatedAppendDimValue(Exception):
     """Exception raised for when a duplicated value is found in the append dim."""
 
@@ -24,4 +23,33 @@ class DuplicatedAppendDimValue(Exception):
         logging.warning(msg_general)
         logging.warning(msg_specific)
         message = msg_general + msg_specific
+        super().__init__(message)
+
+class DimensionMismatch(Exception):
+    """Exception raised for when a dimension mismatch is found"""
+
+    def __init__(self, dim, size, expected_size):
+        """Initialise the exception."""
+        message = f"Dimension {dim} has size {size}, expected {expected_size}."
+        logging.warning(message)
+        super().__init__(message)
+
+class ExpectedAttrsNotFound(Exception):
+    """Exception raised for when expected attributes are not found in the metadata."""
+
+    def __init__(self, expected_attrs):
+        """Initialise the exception."""
+        message = f"Expected {expected_attrs} not found in metadata."
+        logging.warning(message)
+        super().__init__(message)
+
+class CheckSumMismatch(Exception):
+    """Exception raised for when a checksum mismatch is found."""
+
+    def __init__(self, new_chunk, expected_checksum, actual_checksum):
+        """Initialise the exception."""
+        message = (
+            f"Checksum mismatch for chunk {new_chunk}. Expected: {expected_checksum}, Actual: {actual_checksum}"
+        )
+        logging.warning(message)
         super().__init__(message)

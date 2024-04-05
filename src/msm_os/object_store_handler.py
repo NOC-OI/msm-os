@@ -6,12 +6,18 @@ from typing import Any, List, Optional
 import numpy as np
 import xarray as xr
 
-from .exceptions import DuplicatedAppendDimValue
+from .exceptions import (
+    DuplicatedAppendDimValue,
+    ExpectedAttrsNotFound,
+    DimensionMismatch,
+    CheckSumMismatch,
+)
 from .object_store import ObjectStoreS3
 from .sanity_cheks import (
     check_destination_exists,
     check_duplicates,
     check_variable_exists,
+    check_data_integrity,
 )
 
 try:
@@ -20,7 +26,6 @@ except ImportError:
     logging.warning(
         "Dask is not installed. Please install it to use parallel features."
     )
-
 
 def update(
     filepaths: List[str],
@@ -53,11 +58,12 @@ def update(
     """
     to_zarr_kwargs = to_zarr_kwargs or {}
 
-    obj_store = ObjectStoreS3(anon=False, store_credentials_json=store_credentials_json)
+    obj_store = ObjectStoreS3(anon=False,
+                              store_credentials_json=store_credentials_json)
     check_destination_exists(obj_store, bucket)
 
     for filepath in filepaths:
-        logging.info(f"Updating using {filepath}")
+        logging.info("Updating using %s", filepath)
         object_prefix = _get_object_prefix(filepath, object_prefix)
 
         ds_filepath = xr.open_dataset(filepath)
@@ -116,12 +122,12 @@ def send(
     obj_store = ObjectStoreS3(anon=False, store_credentials_json=store_credentials_json)
 
     if not obj_store.exists(bucket):
-        logging.info(f"Bucket '{bucket}' doesn't exist. Creating...")
-        obj_store.create_bucket(bucket)
+        logging.info("Bucket '%s' doesn't exist. Creating...", bucket)
 
     for filepath in filepaths:
-        logging.info(f"Sending {filepath}")
+        logging.info("Sending %s", filepath)
         ds_filepath = xr.open_dataset(filepath, chunks="auto")
+
         prefix = _get_object_prefix(filepath, object_prefix)
 
         _send_data_to_store(
@@ -217,7 +223,7 @@ def _update_data(
     try:
         check_duplicates(ds_filepath, ds_obj_store, append_dim)
     except DuplicatedAppendDimValue:
-        logging.info(f"Updating {mapper.root}")
+        logging.info("Updating %s", mapper.root)
         # Define region to write to
         dupl = np.where(np.isin(ds_obj_store[append_dim], ds_filepath[append_dim]))
         dupl_max = np.max(dupl) + 1
@@ -232,11 +238,11 @@ def _update_data(
         ]
         ds_filepath = ds_filepath.drop_vars(vars_to_drop)
         ds_filepath[var].to_zarr(mapper, mode="r+", region=region)
-        logging.info(f"Updated {mapper.root}")
+        logging.info("Updated %s", mapper.root)
 
         return
 
-    logging.info(f"Skipping {mapper.root} because region not found in object store")
+    logging.info("Skipping %s because region not found in object store", mapper.root)
 
 
 def _send_variable(
@@ -274,25 +280,202 @@ def _send_variable(
 
         if append_dim not in ds_filepath[var].dims:
             logging.info(
-                f"Skipping {dest} because {append_dim} is not in the dimensions of {var}"
+                "Skipping %s because %s is not in the dimensions of %s",
+                dest,
+                append_dim,
+                var
             )
             return
 
-        logging.info(f"Appending to {dest} along the {append_dim} dimension")
+        logging.info("Appending to %s along the %s dimension", dest, append_dim)
 
         try:
             ds_obj_store = xr.open_zarr(mapper)
             check_duplicates(ds_filepath, ds_obj_store, append_dim)
+
+            # Calculate expected size, variables, chunks and checksum
+            ds_filepath = _calculate_metadata(ds_obj_store,
+                                              ds_filepath,
+                                              var,
+                                              append_dim)
+
+            # Append the variable to the object store
             ds_filepath[var].to_zarr(mapper, mode="a", append_dim=append_dim)
+
         except DuplicatedAppendDimValue:
             logging.info(
-                f"Skipping {dest} due to duplicate values in the append dimension"
+                "Skipping %s due to duplicate values in the append dimension",
+                dest
             )
 
+        try:
+            # Check data integrity
+            logging.info("Checking data integrity for %s", dest)
+            check_data_integrity(mapper, var, append_dim)
+            logging.info("Data integrity check passed for %s", dest)
+            remove_latest_version(obj_store, bucket, object_prefix, var)
+        except (ExpectedAttrsNotFound, DimensionMismatch, CheckSumMismatch) as error:
+            if isinstance(error, ExpectedAttrsNotFound):
+                error_msg = "missing expected attributes in the metadata"
+            elif isinstance(error, DimensionMismatch):
+                error_msg = "dimension mismatch"
+            elif isinstance(error, CheckSumMismatch):
+                error_msg = "checksum mismatch"
+
+            logging.info(
+                "Error found while trying to update file %s: %s",
+                dest,
+                error_msg
+            )
+            logging.info(
+                "Object store object %s will be rolled back to previous version",
+                dest
+            )
+            rollback_object(obj_store, bucket, object_prefix, var)
+
     except FileNotFoundError:
-        logging.info(f"Creating {dest}")
+        logging.info("Creating %s", dest)
         ds_filepath[var].to_zarr(mapper, mode="w")
 
+def _calculate_metadata(ds_obj_store: xr.Dataset,
+                        ds_filepath: xr.Dataset,
+                        var: str,
+                        append_dim: str) -> xr.Dataset:
+    """
+    Calculate metadata for the dataset.
+
+    Parameters
+    ----------
+    ds_obj_store : xr.Dataset
+        The dataset to which the variable will be appended.
+    ds_filepath : xr.Dataset
+        The dataset that will be appended.
+    var : str
+        The name of the variable being appended.
+    append_dim : str
+        The name of the dimension along which the variable is being appended.
+
+    Returns
+    -------
+    xr.Dataset
+        The dataset with the calculated metadata.
+    """
+
+    # Calculate expected size for the dimension
+    expected_size = _calculate_expected_dimension_size(ds_obj_store, ds_filepath, var, append_dim)
+    ds_filepath[append_dim].attrs['expected_size'] = expected_size
+
+    # Calculate expected variables for the dataset
+    expected_variables = list(set(list(ds_obj_store.keys()) + list(ds_filepath.keys())))
+    ds_filepath.attrs['expected_variables'] = expected_variables
+
+    # Calculate chunks fo the object store dataset
+    ds_filepath.attrs['calculated_chunks'] = ds_obj_store.chunks[append_dim]
+
+    # Calculate checksum for the variable
+    data_bytes = ds_filepath[var].values.tobytes()
+    expected_checksum = np.frombuffer(data_bytes, dtype=np.uint32).sum()
+    ds_filepath.attrs['expected_checksum'] = expected_checksum
+
+    return ds_filepath
+
+
+def _calculate_expected_dimension_size(ds_obj_store: xr.Dataset,
+                                       ds_filepath: xr.Dataset,
+                                       var: str,
+                                       append_dim: str) -> int:
+    """
+    Calculate the expected size for the specified dimension based on the current
+    dataset and variable.
+
+    Parameters
+    ----------
+    ds_obj_store : xr.Dataset
+        The dataset to which the variable will be appended.
+    ds_filepath : xr.Dataset
+        The dataset that will be appended.
+    var : str
+        The name of the variable being appended.
+    append_dim : str
+        The name of the dimension along which the variable is being appended.
+
+    Returns
+    -------
+    int
+        The expected size for the specified dimension.
+    """
+    if append_dim == "time_counter":
+        current_size = len(ds_obj_store[append_dim])
+        append_size = len(ds_filepath[append_dim])
+        expected_size = current_size + append_size
+    elif append_dim in ds_filepath.dims:
+        expected_size = len(ds_filepath[append_dim])
+    else:
+        expected_size = len(ds_filepath[var].dims[append_dim])
+
+    return expected_size
+
+def rollback_object(obj_store: ObjectStoreS3,
+                    bucket,
+                    object_prefix,
+                    var):
+    """
+    Rollback the object to the previous version in the S3 bucket.
+
+    Parameters
+    ----------
+    obj_store
+        Object store to be used.
+    bucket
+        Name of the bucket in the object store.
+    object_prefix
+        Prefix to be added to the object names in the object store.
+    var
+        Name of the variable to be rolled back.
+    """
+
+    # List object versions
+    versions = obj_store.versions(bucket, prefix=f"{object_prefix}/{var}.zarr")
+    dest = f"{bucket}/{object_prefix}/{var}.zarr"
+
+    # Retrieve the previous version (if available)
+    if len(versions) > 1:
+        previous_version_id = versions[-2]['VersionId']
+        obj_store.copy(f"s3://{dest}?versionId={previous_version_id}", f"{dest}")
+        logging.info("Rolled back %s to the previous version", dest)
+    else:
+        logging.info("No previous version found for %s", dest)
+
+def remove_latest_version(obj_store: ObjectStoreS3,
+                          bucket,
+                          object_prefix,
+                          var):
+    """
+    Remove the latest version of the object from the S3 bucket.
+
+    Parameters
+    ----------
+    obj_store
+        Object store to be used.
+    bucket
+        Name of the bucket in the object store.
+    object_prefix
+        Prefix to be added to the object names in the object store.
+    var
+        Name of the variable to be rolled back.
+    """
+    # List object versions
+    versions = obj_store.versions(bucket, prefix=f"{object_prefix}/{var}.zarr")
+    dest = f"{bucket}/{object_prefix}/{var}.zarr"
+
+
+    # Delete the latest version (if available)
+    if versions:
+        latest_version_id = versions[0]['VersionId']
+        obj_store.rm(f"s3://{dest}?versionId={latest_version_id}")
+        logging.info("Deleted the latest version of %s", dest)
+    else:
+        logging.info("No version found for %s", dest)
 
 def _send_data_to_store(
     obj_store: ObjectStoreS3,
@@ -327,8 +510,11 @@ def _send_data_to_store(
     client
         Dask client.
     to_zarr_kwargs
-        Additional keyword arguments passed to xr.Dataset.to_zarr().
+        Additional keyword arguments passed to xr.Dataset.to_zarr(), by default None.
     """
+    #TODO: Add support for parallel sending
+    #TODO: Add support for zarr metadata
+    
     # See https://stackoverflow.com/questions/66769922/concurrently-write-xarray-datasets-to-zarr-how-to-efficiently-scale-with-dask
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
@@ -360,7 +546,7 @@ def _send_data_to_store(
 
         try:
             check_destination_exists(obj_store, dest)
-            logging.info(f"Appending to {dest} along the {append_dim} dimension")
+            logging.info("Appending to %s along the %s dimension", dest, append_dim)
 
             try:
                 ds_obj_store = xr.open_zarr(mapper)
@@ -368,11 +554,11 @@ def _send_data_to_store(
                 ds_filepath.to_zarr(mapper, mode="a", append_dim=append_dim)
             except DuplicatedAppendDimValue:
                 logging.info(
-                    f"Skipping {dest} due to duplicate values in the append dimension"
-                )
+                    "Skipping %s due to duplicate values in the append dimension", dest
+                    )
 
         except FileNotFoundError:
-            logging.info(f"Creating {dest}")
+            logging.info("Creating %s", dest)
             ds_filepath.to_zarr(mapper, mode="w")
 
 
@@ -395,8 +581,9 @@ def get_files(
     List[str]
         List of files in the bucket.
     """
-    obj_store = ObjectStoreS3(anon=False, store_credentials_json=store_credentials_json)
-    logging.info(f"List of files in bucket '{bucket}':")
+    obj_store = ObjectStoreS3(anon=False,
+                              store_credentials_json=store_credentials_json)
+    logging.info("Getting list of files in bucket '%s'", bucket)
     for file in obj_store.ls(f"{bucket}"):
         logging.info(file)
     return obj_store.ls(f"{bucket}")
