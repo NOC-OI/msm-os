@@ -38,6 +38,21 @@ An additional flag is used in this case:
 
 - `-v`: The name of the variable to update.
 
+### Check data integrity
+
+1. Implementing Data Integrity Checks
+pre-upload check
+checksum
+versioning
+metadata validation
+
+
+2. Correcting Inconsistent Metadata
+create a repair tool
+retry logic
+manual check
+post upload checking
+
 ## Flags
 
 ### Mandatory Flags
