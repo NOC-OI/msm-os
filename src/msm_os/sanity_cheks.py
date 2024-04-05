@@ -3,8 +3,9 @@ import hashlib
 import numpy as np
 import xarray as xr
 from fsspec.mapping import FSMap
+from typing import List
 
-from .exceptions import DuplicatedAppendDimValue, VariableNotFound
+from .exceptions import DuplicatedAppendDimValue, VariableNotFound, ExpectedAttrsNotFound, DimensionMismatch, CheckSumMismatch
 
 
 def check_duplicates(
@@ -100,84 +101,40 @@ def check_destination_exists(
         raise FileNotFoundError(f"Destination '{dest}' doesn't exist in object store.")
 
 
-def calculate_checksum(data_bytes: bytes) -> str:
-    """
-    Calculate the SHA-256 checksum of given data bytes.
-    
-    Parameters
-    ----------
-    data_bytes : bytes
-        The data over which to calculate the checksum.
-    
-    Returns
-    -------
-    str
-        The calculated checksum as a hexadecimal string.
-    """
-    sha256_hash = hashlib.sha256()
-    sha256_hash.update(data_bytes)
-    return sha256_hash.hexdigest()
 
-def calculate_checksum_chunkwise(variable: xr.DataArray) -> str:
+def check_data_integrity(
+    mapper: FSMap,
+    var: str,
+    append_dim: str,
+    test_list: List[str] = None
+) -> None:
     """
-    Calculate the SHA-256 checksum of a DataArray variable, chunk by chunk.
     
-    Parameters
-    ----------
-    variable : xr.DataArray
-        The DataArray variable for which to calculate the checksum.
-    
-    Returns
-    -------
-    str
-        The final checksum as a hexadecimal string, representing the combined checksum of all chunks.
-    """
-    sha256_hash = hashlib.sha256()
-    
-    # Ensure the data is loaded as dask array to avoid loading into memory
-    if isinstance(variable.data, np.ndarray):
-        variable = variable.chunk()
-    
-    # Iterate over all chunks
-    for block in variable.data.blocks:
-        # Compute the checksum for each chunk and update the overall hash
-        chunk_data = block.compute()
-        sha256_hash.update(chunk_data.tobytes())
-    
-    return sha256_hash.hexdigest()
+    Update/replace the object store with new data.
 
-def verify_checksum(
-    ds_obj_store: xr.Dataset,
-    bucket: str,
-    object_prefix: str,
-    var: str
-) -> bool:
-    """
-    Verify the checksum of a variable in the object store matches the pre-calculated checksum.
-    
     Parameters
     ----------
-    obj_store : ObjectStoreS3
+    mapper
         The object store interface.
-    bucket : str
-        The bucket name.
-    object_prefix : str
-        The object prefix.
-    var : str
-        The variable name.
-        
-    Returns
-    -------
-    bool
-        True if the checksums match, False otherwise.
+    var
+        The variable to check.
+    append_dim
+        The name of the dimension to check for duplicates.
+    test_list
+        List of tests to perform. Default is ["metadata", "checksum"].
     """
-    # Fetch the stored checksum
-    stored_checksum = ds_obj_store.attrs.get(f"{var}_checksum", "")   
-    recalculated_checksum = calculate_checksum(ds_obj_store[var].values.tobytes()
-    
-    # Compare the checksums
-    return stored_checksum == recalculated_checksum
+    if test_list is None:
+        test_list = ["metadata", "checksum"]
 
+    ds_obj_store = xr.open_zarr(mapper)
+    check_variable_exists(ds_obj_store, var)
+    
+    for test in test_list:
+        if test == 'metadata':
+            validate_dimensions(ds_obj_store)
+            validate_variables(ds_obj_store)
+        if test == "checksum":
+            validate_checksum(ds_obj_store, var, append_dim)
 
 def validate_dimensions(ds_obj_store: xr.Dataset):
     """
@@ -189,49 +146,68 @@ def validate_dimensions(ds_obj_store: xr.Dataset):
         The dataset loaded from the object store.
     """
     for dim, size in ds_obj_store.dims.items():
-        # Assuming you have a way to determine the expected size for each dimension
-        expected_size = get_expected_dimension_size(dim)
+        # Get the expected size from the attribute
+        expected_size = ds_obj_store[dim].attrs.get('expected_size', None)
+        if expected_size is None:
+            raise ExpectedAttrsNotFound('expected_size')
+
+        # Compare the expected size with the actual size
         if size != expected_size:
-            raise ValueError(f"Dimension {dim} has size {size}, expected {expected_size}.")
+            raise DimensionMismatch(dim, size, expected_size)
 
-def validate_variable_attributes(ds_obj_store: xr.Dataset):
+def validate_variables(ds_obj_store: xr.Dataset):
     """
-    Validates variable attributes such as data types and attribute values.
+    Audit variables of the dataset.
 
     Parameters
     ----------
     ds_obj_store : xr.Dataset
-        The dataset loaded from the object store.
+        Dataset loaded from the Zarr store.
+
     """
-    for var_name, var in ds_obj_store.variables.items():
-        # Check data type
-        expected_dtype = get_expected_dtype(var_name)
-        if var.dtype != expected_dtype:
-            raise ValueError(f"Variable {var_name} has dtype {var.dtype}, expected {expected_dtype}.")
-        
-        # Check other attributes like units, descriptions, etc.
-        # assuming you have a way to determine expected attributes
-        expected_attributes = get_expected_attributes(var_name)
-        for attr_name, expected_value in expected_attributes.items():
-            if var.attrs.get(attr_name) != expected_value:
-                raise ValueError(f"Attribute {attr_name} for variable {var_name} is {var.attrs.get(attr_name)}, expected {expected_value}.")
+    expected_variables = ds_obj_store.attrs.get('expected_variables', None)
 
+    if expected_variables is None:
+        raise ExpectedAttrsNotFound('expected_variables')
 
-def check_checksum(ds_obj_store: xr.Dataset, var: str):
-    """ 
-    Check if the checksum of the variable is equal to the checksum in the object store.
-    
+    for var in expected_variables:
+        if var not in ds_obj_store.variables:
+            raise VariableNotFound(var)
+
+def validate_checksum(ds_obj_store: xr.Dataset, var: str, append_dim: str):
+    """
+    Validate the checksum of the dataset.
+
     Parameters
     ----------
     ds_obj_store : xr.Dataset
-        The dataset in the object store.
-    var : str
-        The name of the variable to check.
+        Dataset loaded from the Zarr store.
+    var
+        The variable to check.
+    append_dim
+        The name of the dimension to check for duplicates.
     """
-    
-    saved_checksum = ds_obj_store.attrs.get(f"{var}_checksum", "")
-    checksum_obj_store = calculate_checksum_chunkwise(ds_obj_store[var])
-    if checksum != checksum_obj_store:
-        logging.error(f"Checksum of {var} is not equal to the checksum in the object store")
+    old_chunks = ds_obj_store.attrs.get('calculated_chunks', None)
+    all_chunks = ds_obj_store.chunks[append_dim]
+    if old_chunks is None:
+        new_chunks = all_chunks
     else:
-        logging.info(f"Checksum of {var} is equal to the checksum in the object store")
+        new_chunks = []
+        for idx, value in enumerate(old_chunks):
+            if value != all_chunks[idx]:
+                new_chunks.append(idx)
+        if len(all_chunks) > len(old_chunks):
+            new_chunks.append(list(range(len(old_chunks), len(list(range(len(all_chunks)))))))
+    for new_chunk in new_chunks:
+        specific_chunk = ds_obj_store.isel({append_dim: new_chunk})
+        if specific_chunk is not None:
+            if specific_chunk.sizes[append_dim] != new_chunk:
+                raise DimensionMismatch(append_dim, new_chunk, specific_chunk.sizes[append_dim])
+            # if np.isnan(specific_chunk).any():
+            #     print("Chunk contains NaN values.")
+            expected_checksum = specific_chunk.attrs.get("expected_checksum", None)
+            if expected_checksum:
+                data_bytes = specific_chunk[var].values.tobytes()
+                actual_checksum = np.frombuffer(data_bytes, dtype=np.uint32).sum()
+                if actual_checksum != expected_checksum:
+                    raise CheckSumMismatch(new_chunk, expected_checksum, actual_checksum)
