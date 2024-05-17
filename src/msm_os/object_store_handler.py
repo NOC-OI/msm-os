@@ -311,7 +311,7 @@ def _send_variable(
         try:
             # Check data integrity
             logging.info("Checking data integrity for %s", dest)
-            check_data_integrity(mapper, var, append_dim)
+            check_data_integrity(mapper, var, append_dim, ds_filepath)
             logging.info("Data integrity check passed for %s", dest)
             remove_latest_version(obj_store, bucket, object_prefix, var)
         except (ExpectedAttrsNotFound, DimensionMismatch, CheckSumMismatch) as error:
@@ -375,7 +375,7 @@ def _calculate_metadata(ds_obj_store: xr.Dataset,
     # Calculate checksum for the variable
     data_bytes = ds_filepath[var].values.tobytes()
     expected_checksum = np.frombuffer(data_bytes, dtype=np.uint32).sum()
-    ds_filepath.attrs['expected_checksum'] = expected_checksum
+    ds_filepath.attrs[f'expected_checksum_{ds_filepath[var].time_counter.value[0]}'] = expected_checksum
 
     return ds_filepath
 

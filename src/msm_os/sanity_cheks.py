@@ -106,6 +106,7 @@ def check_data_integrity(
     mapper: FSMap,
     var: str,
     append_dim: str,
+    ds: xr.Dataset,
     test_list: List[str] = None
 ) -> None:
     """
@@ -128,13 +129,13 @@ def check_data_integrity(
 
     ds_obj_store = xr.open_zarr(mapper)
     check_variable_exists(ds_obj_store, var)
-    
+
     for test in test_list:
         if test == 'metadata':
             validate_dimensions(ds_obj_store)
             validate_variables(ds_obj_store)
         if test == "checksum":
-            validate_checksum(ds_obj_store, var, append_dim)
+            validate_checksum(ds_obj_store, var, append_dim, ds)
 
 def validate_dimensions(ds_obj_store: xr.Dataset):
     """
@@ -174,7 +175,10 @@ def validate_variables(ds_obj_store: xr.Dataset):
         if var not in ds_obj_store.variables:
             raise VariableNotFound(var)
 
-def validate_checksum(ds_obj_store: xr.Dataset, var: str, append_dim: str):
+def validate_checksum(ds_obj_store: xr.Dataset,
+                      var: str,
+                      append_dim: str,
+                      ds: xr.Dataset):
     """
     Validate the checksum of the dataset.
 
@@ -186,28 +190,23 @@ def validate_checksum(ds_obj_store: xr.Dataset, var: str, append_dim: str):
         The variable to check.
     append_dim
         The name of the dimension to check for duplicates.
+    ds
+        The dataset to be checked.
     """
-    old_chunks = ds_obj_store.attrs.get('calculated_chunks', None)
-    all_chunks = ds_obj_store.chunks[append_dim]
-    if old_chunks is None:
-        new_chunks = all_chunks
-    else:
-        new_chunks = []
-        for idx, value in enumerate(old_chunks):
-            if value != all_chunks[idx]:
-                new_chunks.append(idx)
-        if len(all_chunks) > len(old_chunks):
-            new_chunks.append(list(range(len(old_chunks), len(list(range(len(all_chunks)))))))
-    for new_chunk in new_chunks:
-        specific_chunk = ds_obj_store.isel({append_dim: new_chunk})
-        if specific_chunk is not None:
-            if specific_chunk.sizes[append_dim] != new_chunk:
-                raise DimensionMismatch(append_dim, new_chunk, specific_chunk.sizes[append_dim])
-            # if np.isnan(specific_chunk).any():
-            #     print("Chunk contains NaN values.")
-            expected_checksum = specific_chunk.attrs.get("expected_checksum", None)
-            if expected_checksum:
-                data_bytes = specific_chunk[var].values.tobytes()
-                actual_checksum = np.frombuffer(data_bytes, dtype=np.uint32).sum()
-                if actual_checksum != expected_checksum:
-                    raise CheckSumMismatch(new_chunk, expected_checksum, actual_checksum)
+    specific_chunk = ds_obj_store.isel({append_dim: ds[append_dim].values[-1]})
+    if specific_chunk is not None:
+        expected_checksum = specific_chunk.attrs.get(
+            f"expected_checksum_{ds[append_dim].values[-1]}", None)
+        if expected_checksum:
+            data_bytes = specific_chunk[var].values.tobytes()
+            actual_checksum = np.frombuffer(data_bytes, dtype=np.uint32).sum()
+            if actual_checksum != expected_checksum:
+                raise CheckSumMismatch(append_dim,
+                                       ds[append_dim].values[-1],
+                                       expected_checksum,
+                                       actual_checksum)
+        else:
+            raise CheckSumMismatch(append_dim,
+                                   ds[append_dim].values[-1],
+                                   expected_checksum,
+                                   actual_checksum)
