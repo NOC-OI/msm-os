@@ -175,6 +175,26 @@ def validate_variables(ds_obj_store: xr.Dataset):
         if var not in ds_obj_store.variables:
             raise VariableNotFound(var)
 
+def validate_coords(ds_obj_store: xr.Dataset):
+    """
+    Audit coords of the dataset.
+
+    Parameters
+    ----------
+    ds_obj_store : xr.Dataset
+        Dataset loaded from the Zarr store.
+
+    """
+    expected_coords = ds_obj_store.attrs.get('expected_coords', None)
+
+    if expected_coords is None:
+        raise ExpectedAttrsNotFound('expected_coords')
+
+    for var in expected_coords:
+        if var not in ds_obj_store.coords:
+            raise VariableNotFound(var)
+
+
 def validate_checksum(ds_obj_store: xr.Dataset,
                       var: str,
                       append_dim: str,
