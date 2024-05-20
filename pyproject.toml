@@ -19,6 +19,7 @@ dependencies = [
   "s3fs>=2023.3.0",
   "fsspec>=2023.3.0",
   "numpy==1.23.5",
+  "scitools-iris>=3.9.0",
   ]
 
 dynamic = ["version"]

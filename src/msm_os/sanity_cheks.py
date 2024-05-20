@@ -200,6 +200,9 @@ def validate_checksum(ds_obj_store: xr.Dataset,
         if expected_checksum:
             data_bytes = specific_chunk[var].values.tobytes()
             actual_checksum = np.frombuffer(data_bytes, dtype=np.uint32).sum()
+            data_bytes_reprojected = specific_chunk[f"reprojected_{var}"].values.tobytes()
+            actual_checksum += np.frombuffer(data_bytes_reprojected, dtype=np.uint32).sum()
+
             if actual_checksum != expected_checksum:
                 raise CheckSumMismatch(append_dim,
                                        ds[append_dim].values[-1],
