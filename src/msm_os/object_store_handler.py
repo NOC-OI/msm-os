@@ -368,7 +368,12 @@ def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
         The reprojected dataset.
     """
     da_filepath = ds_filepath[var]
+    list_dim = list(da_filepath.sizes)
+    index_of_y = list_dim.index('y')
+    index_of_x = list_dim.index('x')
     cube = da_filepath.to_iris()
+    print(cube)
+    print(cube.aux_coords)
     cube.remove_coord('latitude')
     cube.remove_coord('longitude')
     latitude = iris.coords.AuxCoord(
@@ -379,15 +384,15 @@ def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
         da_filepath['nav_lon'].values,
         standard_name='longitude',
         units='degrees')
-    cube.add_aux_coord(latitude, (1, 2))
-    cube.add_aux_coord(longitude, (1, 2))
+    cube.add_aux_coord(latitude, (index_of_y, index_of_x))
+    cube.add_aux_coord(longitude, (index_of_y, index_of_x))
     target_projection = ccrs.PlateCarree()
     try:
         projected_cube = iris.analysis.cartography.project(
             cube,
             target_projection,
-            nx=da_filepath.shape[2],
-            ny=da_filepath.shape[1])
+            nx=da_filepath.shape[index_of_x],
+            ny=da_filepath.shape[index_of_y])
     except ValueError as e:
         print("Error during projection:", e)
         return
@@ -445,7 +450,7 @@ def _calculate_metadata(ds_obj_store: xr.Dataset,
     expected_checksum += np.frombuffer(data_bytes_reprojected, dtype=np.uint32).sum()
 
     ds_filepath.attrs[
-        f'expected_checksum_{ds_filepath[var].time_counter.value[0]}'] = expected_checksum
+        f'expected_checksum_{ds_filepath[var].time_counter.values[0]}'] = expected_checksum
 
     return ds_filepath
 
