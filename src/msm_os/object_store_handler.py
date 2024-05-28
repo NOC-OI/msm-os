@@ -701,3 +701,4 @@ def get_files(
     for file in obj_store.ls(f"{bucket}"):
         logging.info(file)
     return obj_store.ls(f"{bucket}")
+
