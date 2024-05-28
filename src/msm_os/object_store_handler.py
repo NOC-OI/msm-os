@@ -1,4 +1,3 @@
-"""Module with object store handlers."""
 import logging
 import os
 from typing import Any, List, Optional
@@ -7,7 +6,8 @@ import numpy as np
 import xarray as xr
 import iris
 import cartopy.crs as ccrs
-
+import cf_units
+import zarr
 from .exceptions import (
     DuplicatedAppendDimValue,
     ExpectedAttrsNotFound,
@@ -277,6 +277,7 @@ def _send_variable(
 
     dest = f"{bucket}/{object_prefix}/{var}.zarr"
     mapper = obj_store.get_mapper(dest)
+
     try:
         check_destination_exists(obj_store, dest)
 
@@ -311,13 +312,18 @@ def _send_variable(
                 "Skipping %s due to duplicate values in the append dimension",
                 dest
             )
+            return
+        except KeyError:
+            logging.info(
+                "Skipping %s due to no %s on data dimensions", dest, append_dim
+                )
+            return
 
         # Check data integrity
         try:
             logging.info("Checking data integrity for %s", dest)
             check_data_integrity(mapper, var, append_dim, reprojected_ds_filepath_var)
             logging.info("Data integrity check passed for %s", dest)
-            remove_latest_version(obj_store, bucket, object_prefix, var)
         except (ExpectedAttrsNotFound, DimensionMismatch, CheckSumMismatch) as error:
             if isinstance(error, ExpectedAttrsNotFound):
                 error_msg = "missing expected attributes in the metadata"
@@ -326,30 +332,40 @@ def _send_variable(
             elif isinstance(error, CheckSumMismatch):
                 error_msg = "checksum mismatch"
 
-            logging.warning(
-                "Error found while trying to update file %s with time value of %s: %s",
-                dest,
-                ds_filepath[var].time_counter.value[0],
-                error_msg
-            )
+            if append_dim not in list(ds_filepath[var].sizes):
+                logging.warning(
+                    "Error found while trying to update file %s: %s. Error: %s",
+                    dest,
+                    error_msg,
+                    error
+                )
+            else:
+                logging.warning(
+                    "Error found while trying to update file %s with time value of %s: %s. Error: %s",
+                    dest,
+                    ds_filepath[var].time_counter.values[0],
+                    error_msg,
+                    error
+                )
+
             logging.warning(
                 "Object store object %s will be rolled back to previous version",
                 dest
             )
-            rollback_object(obj_store, bucket, object_prefix, var)
+            rollback_object(obj_store, bucket, object_prefix, var, append_dim)
 
     except FileNotFoundError:
         logging.info("Creating %s", dest)
         reprojected_ds_filepath_var = _reproject_ds(ds_filepath, var)
 
         # Calculate expected size, variables, chunks and checksum
-        reprojected_ds_filepath_var = _calculate_metadata(ds_obj_store,
+        reprojected_ds_filepath_var = _calculate_metadata(xr.Dataset(),
                                             reprojected_ds_filepath_var,
                                             var,
                                             append_dim)
 
         # Append the variable to the object store
-        reprojected_ds_filepath_var.to_zarr(mapper, mode="a", append_dim=append_dim)
+        reprojected_ds_filepath_var.to_zarr(mapper, mode="a")
 
 def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
     """
@@ -368,36 +384,69 @@ def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
         The reprojected dataset.
     """
     da_filepath = ds_filepath[var]
+
+
     list_dim = list(da_filepath.sizes)
+    # logging.info("List dim: %s", list_dim)
+    if 'y' not in list_dim:
+        combined_ds = xr.Dataset({var: da_filepath})
+        return combined_ds
+
     index_of_y = list_dim.index('y')
-    index_of_x = list_dim.index('x')
+    index_of_x = list_dim.index('x')    
+
+
+    standard_name = da_filepath.attrs.get('standard_name', None)
+    if standard_name:
+        da_filepath.attrs['standard_name'] = None
+    units = da_filepath.attrs.get('units', None)
+    if units:
+        da_filepath.attrs['units'] = None
+
     cube = da_filepath.to_iris()
-    print(cube)
-    print(cube.aux_coords)
-    cube.remove_coord('latitude')
-    cube.remove_coord('longitude')
-    latitude = iris.coords.AuxCoord(
-        da_filepath['nav_lat'].values,
-        standard_name='latitude',
-        units='degrees')
-    longitude = iris.coords.AuxCoord(
-        da_filepath['nav_lon'].values,
-        standard_name='longitude',
-        units='degrees')
-    cube.add_aux_coord(latitude, (index_of_y, index_of_x))
-    cube.add_aux_coord(longitude, (index_of_y, index_of_x))
+    for coord in cube.aux_coords:
+        if coord.standard_name == 'latitude':
+            cube.remove_coord('latitude')
+            latitude = iris.coords.AuxCoord(
+                da_filepath['nav_lat'].values,
+                standard_name='latitude',
+                units='degrees')
+            cube.add_aux_coord(latitude, (index_of_y, index_of_x))
+
+        if coord.standard_name == 'longitude':
+            cube.remove_coord('longitude')
+            longitude = iris.coords.AuxCoord(
+                da_filepath['nav_lon'].values,
+                standard_name='longitude',
+                units='degrees')
+            cube.add_aux_coord(longitude, (index_of_y, index_of_x))
+
+    if units:
+        try:
+            cube.units = cf_units.Unit(units)
+            logging.info("Setting units to: %s", units)
+        except:
+            logging.info("Warning: No units found. Setting units to 'None'")
+            cube.units = cf_units.Unit(None)
+    if standard_name:
+        try:
+            cube.standard_name = standard_name
+            logging.info("Setting standard_name to correct value: %s", standard_name)
+        except ValueError:
+            logging.info("Warning: Standard Name is not valid. Set long name instead to %s", standard_name)
+            cube.long_name = standard_name
+
     target_projection = ccrs.PlateCarree()
-    try:
-        projected_cube = iris.analysis.cartography.project(
-            cube,
-            target_projection,
-            nx=da_filepath.shape[index_of_x],
-            ny=da_filepath.shape[index_of_y])
-    except ValueError as e:
-        print("Error during projection:", e)
-        return
+    # try:
+    projected_cube = iris.analysis.cartography.project(
+        cube,
+        target_projection,
+        nx=da_filepath.shape[index_of_x],
+        ny=da_filepath.shape[index_of_y])
+    # except ValueError as e:
+    #     print("Error during projection:", e)
+    #     return
     data_da = xr.DataArray.from_iris(projected_cube[0])
-    data_da = data_da.rio.write_crs("epsg:4326")
     data_da = data_da.sortby('projection_x_coordinate')
     data_da = data_da.sortby('projection_y_coordinate', ascending=False)
     data_da = data_da.rename({'projection_y_coordinate': 'y', 'projection_x_coordinate': 'x'})
@@ -433,7 +482,7 @@ def _calculate_metadata(ds_obj_store: xr.Dataset,
     """
 
     # Calculate expected size for the dimension
-    expected_size = _calculate_expected_dimension_size(ds_obj_store, ds_filepath, var, append_dim)
+    expected_size = _calculate_expected_dimension_size(ds_obj_store, ds_filepath, append_dim)
     for dim, size in expected_size.items():
         ds_filepath[dim].attrs['expected_size'] = size
 
@@ -446,18 +495,22 @@ def _calculate_metadata(ds_obj_store: xr.Dataset,
     # Calculate checksum for the variable
     data_bytes = ds_filepath[var].values.tobytes()
     expected_checksum = np.frombuffer(data_bytes, dtype=np.uint32).sum()
-    data_bytes_reprojected = ds_filepath[f"projected_{var}"].values.tobytes()
-    expected_checksum += np.frombuffer(data_bytes_reprojected, dtype=np.uint32).sum()
+    if 'y' in list(ds_filepath.sizes):
+        data_bytes_reprojected = ds_filepath[f"projected_{var}"].values.tobytes()
+        expected_checksum += np.frombuffer(data_bytes_reprojected, dtype=np.uint32).sum()
 
-    ds_filepath.attrs[
-        f'expected_checksum_{ds_filepath[var].time_counter.values[0]}'] = expected_checksum
-
+    if append_dim in list(ds_filepath[var].sizes):
+        ds_filepath.attrs[
+            f'expected_checksum_{ds_filepath[var].time_counter.values[0]}'] = expected_checksum
+    else:
+        ds_filepath.attrs[
+            f'expected_checksum_{var}'] = expected_checksum
+        
     return ds_filepath
 
 
 def _calculate_expected_dimension_size(ds_obj_store: xr.Dataset,
                                        ds_filepath: xr.Dataset,
-                                       var: str,
                                        append_dim: str) -> int:
     """
     Calculate the expected size for the specified dimension based on the current
@@ -469,8 +522,6 @@ def _calculate_expected_dimension_size(ds_obj_store: xr.Dataset,
         The dataset to which the variable will be appended.
     ds_filepath : xr.Dataset
         The dataset that will be appended.
-    var : str
-        The name of the variable being appended.
     append_dim : str
         The name of the dimension along which the variable is being appended.
 
@@ -482,7 +533,10 @@ def _calculate_expected_dimension_size(ds_obj_store: xr.Dataset,
     expected_size = {}
     for dim, _ in ds_filepath.sizes.items():
         if dim == append_dim:
-            current_size = len(ds_obj_store[dim])
+            if not ds_obj_store.sizes.get(dim):
+                current_size = 0
+            else:
+                current_size = len(ds_obj_store[dim])
             append_size = len(ds_filepath[dim])
             expected_size[dim] = current_size + append_size
         else:
@@ -491,70 +545,43 @@ def _calculate_expected_dimension_size(ds_obj_store: xr.Dataset,
     return expected_size
 
 def rollback_object(obj_store: ObjectStoreS3,
-                    bucket,
-                    object_prefix,
-                    var):
+                    bucket: str,
+                    object_prefix: str,
+                    var: str,
+                    append_dim: str) -> None:
     """
-    Rollback the object to the previous version in the S3 bucket.
+    Rolls back the Zarr object stored in the object store by removing the
+    last appended dimension.
 
     Parameters
     ----------
     obj_store
-        Object store to be used.
+        Object store instance.
     bucket
-        Name of the bucket in the object store.
+        Name of the bucket.
     object_prefix
-        Prefix to be added to the object names in the object store.
+        Prefix of the object.
     var
-        Name of the variable to be rolled back.
+        Variable name.
+    append_dim
+        Name of the append dimension.
     """
-
-    # List object versions
-    versions = obj_store.versions(bucket, prefix=f"{object_prefix}/{var}.zarr")
     dest = f"{bucket}/{object_prefix}/{var}.zarr"
+    mapper = obj_store.get_mapper(dest)
+    zarr_group = zarr.open(mapper, mode='a')
+    for group in zarr_group:
+        zarr_array = zarr_group[group]
+        original_shape = zarr_array.shape
+        if append_dim in zarr_array.attrs['_ARRAY_DIMENSIONS']:
+            append_dim_index = zarr_array.attrs['_ARRAY_DIMENSIONS'].index(append_dim)
+            new_shape = list(original_shape)
+            new_shape[append_dim_index] -= 1
+            zarr_array.attrs['_ARRAY_DIMENSIONS'] = zarr_array.attrs['_ARRAY_DIMENSIONS']
+            zarr_array.resize(tuple(new_shape))
+    zarr.consolidate_metadata(mapper)
+    zarr_group.store.close()
 
-    # Retrieve the previous version (if available)
-    if len(versions) > 1:
-        previous_version_id = versions[-2]['VersionId']
-        obj_store.copy(f"s3://{dest}?versionId={previous_version_id}", f"{dest}")
-        logging.info("Rolled back %s to the previous version", dest)
-        if len(versions) > 2:
-            latest_version_id = versions[-1]['VersionId']
-            obj_store.delete_object(bucket, f"{object_prefix}/{var}.zarr", VersionId=latest_version_id)
-            logging.info("Deleted the newest version %s", latest_version_id)
-    else:
-        logging.info("No previous version found for %s", dest)
-
-def remove_latest_version(obj_store: ObjectStoreS3,
-                          bucket,
-                          object_prefix,
-                          var):
-    """
-    Remove the latest version of the object from the S3 bucket.
-
-    Parameters
-    ----------
-    obj_store
-        Object store to be used.
-    bucket
-        Name of the bucket in the object store.
-    object_prefix
-        Prefix to be added to the object names in the object store.
-    var
-        Name of the variable to be rolled back.
-    """
-    # List object versions
-    versions = obj_store.versions(bucket, prefix=f"{object_prefix}/{var}.zarr")
-    dest = f"{bucket}/{object_prefix}/{var}.zarr"
-
-
-    # Delete the latest version (if available)
-    if versions:
-        latest_version_id = versions[0]['VersionId']
-        obj_store.rm(f"s3://{dest}?versionId={latest_version_id}")
-        logging.info("Deleted the latest version of %s", dest)
-    else:
-        logging.info("No version found for %s", dest)
+    logging.info("Object store object %s rolled back successfully.", dest)
 
 def _send_data_to_store(
     obj_store: ObjectStoreS3,
@@ -601,6 +628,9 @@ def _send_data_to_store(
         if client:
             futures = []
             for var in variables:
+
+                logging.info(f"XXXX_ {var} _XXXXXX_ {list(ds_filepath[var].sizes)}")
+
                 futures.append(
                     client.submit(
                         _send_variable,
@@ -635,6 +665,11 @@ def _send_data_to_store(
                 logging.info(
                     "Skipping %s due to duplicate values in the append dimension", dest
                     )
+            except KeyError:
+                logging.info(
+                    "Skipping %s due to no %s on data dimensions", dest, append_dim
+                    )
+
 
         except FileNotFoundError:
             logging.info("Creating %s", dest)
