@@ -450,6 +450,7 @@ def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
     data_da = data_da.sortby('projection_x_coordinate')
     data_da = data_da.sortby('projection_y_coordinate', ascending=False)
     data_da = data_da.rename({'projection_y_coordinate': 'y', 'projection_x_coordinate': 'x'})
+    data_da = data_da.where(data_da != 0.0, np.nan)
     # combined_ds = da_filepath.copy()
     combined_ds = xr.Dataset({var: da_filepath})
     combined_ds[f'projected_{var}'] = (data_da.dims, data_da.values)
