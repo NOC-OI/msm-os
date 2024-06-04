@@ -8,6 +8,7 @@ import iris
 import cartopy.crs as ccrs
 import cf_units
 import zarr
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from .exceptions import (
     DuplicatedAppendDimValue,
     ExpectedAttrsNotFound,
@@ -24,10 +25,18 @@ from .sanity_cheks import (
 
 try:
     from dask.distributed import Client
+    from dask.distributed import KilledWorker
 except ImportError:
     logging.warning(
         "Dask is not installed. Please install it to use parallel features."
     )
+
+retry_strategy = retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(min=1, max=10),
+    retry=retry_if_exception_type((ExpectedAttrsNotFound, DimensionMismatch, CheckSumMismatch, KilledWorker)),
+    reraise=True
+)
 
 def update(
     filepaths: List[str],
@@ -246,7 +255,7 @@ def _update_data(
 
     logging.info("Skipping %s because region not found in object store", mapper.root)
 
-
+@retry_strategy
 def _send_variable(
     ds_filepath: xr.Dataset,
     obj_store: ObjectStoreS3,
@@ -305,6 +314,7 @@ def _send_variable(
                                               append_dim)
 
             # Apply custom chunking if the dimensions are present
+
             custom_chunking = True
             if custom_chunking:
                 if all(dim in reprojected_ds_filepath_var.dims for dim in ['x', 'y', 'time_counter']):
