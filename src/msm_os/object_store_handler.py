@@ -137,7 +137,10 @@ def send(
 
     for filepath in filepaths:
         logging.info("Sending %s", filepath)
-        ds_filepath = xr.open_dataset(filepath, chunks="auto")
+        ds_filepath = xr.open_dataset(filepath)
+        chunking = {'x': 100, 'y': 100, 'time_counter': 1}
+        new_chunking = {dim: size for dim, size in chunking.items() if dim in ds_filepath.dims}
+        ds_filepath = ds_filepath.chunk(new_chunking)
 
         prefix = _get_object_prefix(filepath, object_prefix)
 
@@ -314,9 +317,9 @@ def _send_variable(
                                               append_dim)
 
             # Apply custom chunking if the dimensions are present
-            if all(dim in reprojected_ds_filepath_var.dims for dim in ['x', 'y', 'time_counter']):
-                chunking = {'x': 100, 'y': 100, 'time_counter': 1}
-                reprojected_ds_filepath_var = reprojected_ds_filepath_var.chunk(chunking)
+            chunking = {'x': 100, 'y': 100, 'time_counter': 1}
+            new_chunking = {dim: size for dim, size in chunking.items() if dim in reprojected_ds_filepath_var.dims}
+            reprojected_ds_filepath_var = reprojected_ds_filepath_var.chunk(new_chunking)
 
             # Append the variable to the object store
             reprojected_ds_filepath_var.to_zarr(mapper, mode="a", append_dim=append_dim)
