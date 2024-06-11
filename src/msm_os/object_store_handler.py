@@ -384,6 +384,13 @@ def _send_variable(
                                             var,
                                             append_dim)
 
+        # Apply custom chunking if the dimensions are present
+        chunking = {'x': 100, 'y': 100, 'time_counter': 1}
+        for var in reprojected_ds_filepath_var.variables:
+            new_chunking = {dim: size for dim, size in chunking.items() if dim in reprojected_ds_filepath_var[var].dims}
+            if len(new_chunking.keys()) > 0:
+                reprojected_ds_filepath_var[var] = reprojected_ds_filepath_var[var].chunk(new_chunking)
+
         # Append the variable to the object store
         reprojected_ds_filepath_var.to_zarr(mapper, mode="a")
 
