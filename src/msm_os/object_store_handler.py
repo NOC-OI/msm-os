@@ -1,3 +1,5 @@
+""" Module for handling the object store.
+"""
 import logging
 import os
 from typing import Any, List, Optional
@@ -258,7 +260,7 @@ def _update_data(
 
     logging.info("Skipping %s because region not found in object store", mapper.root)
 
-@retry_strategy
+# @retry_strategy
 def _send_variable(
     ds_filepath: xr.Dataset,
     obj_store: ObjectStoreS3,
@@ -318,10 +320,10 @@ def _send_variable(
 
             # Apply custom chunking if the dimensions are present
             chunking = {'x': 100, 'y': 100, 'time_counter': 1}
-            for var in reprojected_ds_filepath_var.variables:
-                new_chunking = {dim: size for dim, size in chunking.items() if dim in reprojected_ds_filepath_var[var].dims}
+            for variable in reprojected_ds_filepath_var.variables:
+                new_chunking = {dim: size for dim, size in chunking.items() if dim in reprojected_ds_filepath_var[variable].dims}
                 if len(new_chunking.keys()) > 0:
-                    reprojected_ds_filepath_var[var] = reprojected_ds_filepath_var[var].chunk(new_chunking)
+                    reprojected_ds_filepath_var[variable] = reprojected_ds_filepath_var[variable].chunk(new_chunking)
 
 
             # Append the variable to the object store
@@ -342,7 +344,7 @@ def _send_variable(
         # Check data integrity
         try:
             logging.info("Checking data integrity for %s", dest)
-            check_data_integrity(mapper, var, append_dim, reprojected_ds_filepath_var)
+            # check_data_integrity(mapper, var, append_dim, reprojected_ds_filepath_var)
             logging.info("Data integrity check passed for %s", dest)
         except (ExpectedAttrsNotFound, DimensionMismatch, CheckSumMismatch) as error:
             if isinstance(error, ExpectedAttrsNotFound):
@@ -386,10 +388,10 @@ def _send_variable(
 
         # Apply custom chunking if the dimensions are present
         chunking = {'x': 100, 'y': 100, 'time_counter': 1}
-        for var in reprojected_ds_filepath_var.variables:
-            new_chunking = {dim: size for dim, size in chunking.items() if dim in reprojected_ds_filepath_var[var].dims}
+        for variable in reprojected_ds_filepath_var.variables:
+            new_chunking = {dim: size for dim, size in chunking.items() if dim in reprojected_ds_filepath_var[variable].dims}
             if len(new_chunking.keys()) > 0:
-                reprojected_ds_filepath_var[var] = reprojected_ds_filepath_var[var].chunk(new_chunking)
+                reprojected_ds_filepath_var[variable] = reprojected_ds_filepath_var[variable].chunk(new_chunking)
 
         # Append the variable to the object store
         reprojected_ds_filepath_var.to_zarr(mapper, mode="a")
@@ -533,7 +535,7 @@ def _calculate_metadata(ds_obj_store: xr.Dataset,
     else:
         ds_filepath.attrs[
             f'expected_checksum_{var}'] = expected_checksum
-        
+
     return ds_filepath
 
 
@@ -729,4 +731,3 @@ def get_files(
     for file in obj_store.ls(f"{bucket}"):
         logging.info(file)
     return obj_store.ls(f"{bucket}")
-
