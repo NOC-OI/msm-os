@@ -140,9 +140,6 @@ def send(
     for filepath in filepaths:
         logging.info("Sending %s", filepath)
         ds_filepath = xr.open_dataset(filepath)
-        chunking = {'x': 100, 'y': 100, 'time_counter': 1}
-        new_chunking = {dim: size for dim, size in chunking.items() if dim in ds_filepath.dims}
-        ds_filepath = ds_filepath.chunk(new_chunking)
 
         prefix = _get_object_prefix(filepath, object_prefix)
 
@@ -320,11 +317,12 @@ def _send_variable(
 
             # Apply custom chunking if the dimensions are present
             chunking = {'x': 100, 'y': 100, 'time_counter': 1}
-            for variable in reprojected_ds_filepath_var.variables:
+            variables = _get_update_variables(ds_filepath, None)
+
+            for variable in variables:
                 new_chunking = {dim: size for dim, size in chunking.items() if dim in reprojected_ds_filepath_var[variable].dims}
                 if len(new_chunking.keys()) > 0:
                     reprojected_ds_filepath_var[variable] = reprojected_ds_filepath_var[variable].chunk(new_chunking)
-
 
             # Append the variable to the object store
             reprojected_ds_filepath_var.to_zarr(mapper, mode="a", append_dim=append_dim)
@@ -388,7 +386,9 @@ def _send_variable(
 
         # Apply custom chunking if the dimensions are present
         chunking = {'x': 100, 'y': 100, 'time_counter': 1}
-        for variable in reprojected_ds_filepath_var.variables:
+        variables = _get_update_variables(ds_filepath, None)
+
+        for variable in variables:
             new_chunking = {dim: size for dim, size in chunking.items() if dim in reprojected_ds_filepath_var[variable].dims}
             if len(new_chunking.keys()) > 0:
                 reprojected_ds_filepath_var[variable] = reprojected_ds_filepath_var[variable].chunk(new_chunking)
@@ -422,7 +422,7 @@ def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
         return combined_ds
 
     index_of_y = list_dim.index('y')
-    index_of_x = list_dim.index('x')    
+    index_of_x = list_dim.index('x')
 
 
     standard_name = da_filepath.attrs.get('standard_name', None)
@@ -479,7 +479,7 @@ def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
     data_da = data_da.sortby('projection_x_coordinate')
     data_da = data_da.sortby('projection_y_coordinate', ascending=False)
     data_da = data_da.rename({'projection_y_coordinate': 'y', 'projection_x_coordinate': 'x'})
-    data_da = data_da.where(data_da != 0.0, np.nan)
+    # data_da = data_da.where(data_da != 0.0, np.nan)
     # combined_ds = da_filepath.copy()
     combined_ds = xr.Dataset({var: da_filepath})
     combined_ds[f'projected_{var}'] = (data_da.dims, data_da.values)
