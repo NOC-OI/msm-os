@@ -309,11 +309,13 @@ def _send_variable(
             # Reproject the dataset to the expected projection
             reprojected_ds_filepath_var = _reproject_ds(ds_filepath, var)
 
+            reprojected_ds_filepath_var = reprojected_ds_filepath_var.fillna(0)
+
             # Calculate expected size, variables, chunks and checksum
-            reprojected_ds_filepath_var = _calculate_metadata(ds_obj_store,
-                                              reprojected_ds_filepath_var,
-                                              var,
-                                              append_dim)
+            # reprojected_ds_filepath_var = _calculate_metadata(ds_obj_store,
+            #                                   reprojected_ds_filepath_var,
+            #                                   var,
+            #                                   append_dim)
 
             # Apply custom chunking if the dimensions are present
             chunking = {'x': 100, 'y': 100, 'time_counter': 1}
@@ -379,10 +381,13 @@ def _send_variable(
         reprojected_ds_filepath_var = _reproject_ds(ds_filepath, var)
 
         # Calculate expected size, variables, chunks and checksum
-        reprojected_ds_filepath_var = _calculate_metadata(xr.Dataset(),
-                                            reprojected_ds_filepath_var,
-                                            var,
-                                            append_dim)
+        reprojected_ds_filepath_var = reprojected_ds_filepath_var.fillna(0)
+
+        # reprojected_ds_filepath_var = _calculate_metadata(xr.Dataset(),
+        #                                     reprojected_ds_filepath_var,
+        #                                     var,
+        #                                     append_dim)
+
 
         # Apply custom chunking if the dimensions are present
         chunking = {'x': 100, 'y': 100, 'time_counter': 1}
@@ -654,7 +659,7 @@ def _send_data_to_store(
     # See https://stackoverflow.com/questions/66769922/concurrently-write-xarray-datasets-to-zarr-how-to-efficiently-scale-with-dask
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
-
+        variables = ['zos']
         if client:
             futures = []
             for var in variables:
