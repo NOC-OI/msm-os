@@ -341,7 +341,7 @@ def _send_variable(
 
             # Append the variable to the object store
             reprojected_ds_filepath_var.to_zarr(
-                mapper, mode="a-", append_dim=append_dim
+                mapper, mode="a", append_dim=append_dim
             )
 
         except DuplicatedAppendDimValue:
