@@ -691,7 +691,6 @@ def _send_data_to_store(
     # See https://stackoverflow.com/questions/66769922/concurrently-write-xarray-datasets-to-zarr-how-to-efficiently-scale-with-dask
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
-        variables = ["zos"]
         if client:
             futures = []
             for var in variables:
