@@ -317,8 +317,6 @@ def _send_variable(
             # Reproject the dataset to the expected projection
             reprojected_ds_filepath_var = _reproject_ds(ds_filepath, var)
 
-            reprojected_ds_filepath_var = reprojected_ds_filepath_var.fillna(0)
-
             # Calculate expected size, variables, chunks and checksum
             reprojected_ds_filepath_var = _calculate_metadata(
                 ds_obj_store, reprojected_ds_filepath_var, var, append_dim
@@ -358,7 +356,7 @@ def _send_variable(
         # Check data integrity
         try:
             logging.info("Checking data integrity for %s", dest)
-            # check_data_integrity(mapper, var, append_dim, reprojected_ds_filepath_var)
+            check_data_integrity(mapper, var, append_dim, reprojected_ds_filepath_var)
             logging.info("Data integrity check passed for %s", dest)
         except (ExpectedAttrsNotFound, DimensionMismatch, CheckSumMismatch) as error:
             if isinstance(error, ExpectedAttrsNotFound):
@@ -394,8 +392,6 @@ def _send_variable(
         reprojected_ds_filepath_var = _reproject_ds(ds_filepath, var)
 
         # Calculate expected size, variables, chunks and checksum
-        reprojected_ds_filepath_var = reprojected_ds_filepath_var.fillna(0)
-
         reprojected_ds_filepath_var = _calculate_metadata(
             xr.Dataset(), reprojected_ds_filepath_var, var, append_dim
         )
