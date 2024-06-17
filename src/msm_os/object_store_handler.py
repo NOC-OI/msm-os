@@ -265,7 +265,7 @@ def _update_data(
     logging.info("Skipping %s because region not found in object store", mapper.root)
 
 
-# @retry_strategy
+@retry_strategy
 def _send_variable(
     ds_filepath: xr.Dataset,
     obj_store: ObjectStoreS3,
@@ -315,32 +315,18 @@ def _send_variable(
             ds_obj_store = xr.open_zarr(mapper)
             check_duplicates(ds_filepath, ds_obj_store, append_dim)
             # Reproject the dataset to the expected projection
-            reprojected_ds_filepath_var = _reproject_ds(ds_filepath, var)
-
-            reprojected_ds_filepath_var = reprojected_ds_filepath_var.fillna(0)
+            reprojected_ds_filepath = _reproject_ds(ds_filepath, var)
 
             # Calculate expected size, variables, chunks and checksum
-            reprojected_ds_filepath_var = _calculate_metadata(
-                ds_obj_store, reprojected_ds_filepath_var, var, append_dim
+            reprojected_ds_filepath = _calculate_metadata(
+                ds_obj_store, reprojected_ds_filepath, var, append_dim
             )
 
-            # Apply custom chunking if the dimensions are present
-            chunking = {"x": 100, "y": 100, "time_counter": 1}
-            variables = _get_update_variables(reprojected_ds_filepath_var, None)
-
-            for variable in variables:
-                new_chunking = {
-                    dim: size
-                    for dim, size in chunking.items()
-                    if dim in reprojected_ds_filepath_var[variable].dims
-                }
-                if len(new_chunking.keys()) > 0:
-                    reprojected_ds_filepath_var[variable] = reprojected_ds_filepath_var[
-                        variable
-                    ].chunk(new_chunking)
+            # Rechunk the dataset
+            reprojected_ds_filepath = _rechunk_ds(reprojected_ds_filepath)
 
             # Append the variable to the object store
-            reprojected_ds_filepath_var.to_zarr(
+            reprojected_ds_filepath.to_zarr(
                 mapper, mode="a", append_dim=append_dim
             )
 
@@ -357,8 +343,7 @@ def _send_variable(
 
         # Check data integrity
         try:
-            logging.info("Checking data integrity for %s", dest)
-            # check_data_integrity(mapper, var, append_dim, reprojected_ds_filepath_var)
+            check_data_integrity(mapper, var, append_dim, reprojected_ds_filepath)
             logging.info("Data integrity check passed for %s", dest)
         except (ExpectedAttrsNotFound, DimensionMismatch, CheckSumMismatch) as error:
             if isinstance(error, ExpectedAttrsNotFound):
@@ -391,33 +376,42 @@ def _send_variable(
 
     except FileNotFoundError:
         logging.info("Creating %s", dest)
-        reprojected_ds_filepath_var = _reproject_ds(ds_filepath, var)
+        reprojected_ds_filepath = _reproject_ds(ds_filepath, var)
 
-        # Calculate expected size, variables, chunks and checksum
-        reprojected_ds_filepath_var = reprojected_ds_filepath_var.fillna(0)
-
-        reprojected_ds_filepath_var = _calculate_metadata(
-            xr.Dataset(), reprojected_ds_filepath_var, var, append_dim
+        reprojected_ds_filepath = _calculate_metadata(
+            xr.Dataset(), reprojected_ds_filepath, var, append_dim
         )
 
-        # Apply custom chunking if the dimensions are present
-        chunking = {"x": 100, "y": 100, "time_counter": 1}
-        variables = _get_update_variables(reprojected_ds_filepath_var, None)
-
-        for variable in variables:
-            new_chunking = {
-                dim: size
-                for dim, size in chunking.items()
-                if dim in reprojected_ds_filepath_var[variable].dims
-            }
-            if len(new_chunking.keys()) > 0:
-                reprojected_ds_filepath_var[variable] = reprojected_ds_filepath_var[
-                    variable
-                ].chunk(new_chunking)
+        reprojected_ds_filepath = _rechunk_ds(reprojected_ds_filepath)
 
         # Append the variable to the object store
-        reprojected_ds_filepath_var.to_zarr(mapper, mode="a")
+        reprojected_ds_filepath.to_zarr(mapper, mode="a")
 
+
+def _rechunk_ds(ds_filepath: xr.Dataset) -> xr.Dataset:
+    """ Rechunk the dataset.
+
+    Args:
+        ds_filepath (xr.Dataset): The dataset to be rechunked.
+
+    Returns:
+        xr.Dataset: The rechunked dataset.
+    """
+    # Apply custom chunking if the dimensions are present
+    chunking = {"x": 100, "y": 100, "time_counter": 1}
+    variables = _get_update_variables(ds_filepath, None)
+
+    for variable in variables:
+        new_chunking = {
+            dim: size
+            for dim, size in chunking.items()
+            if dim in ds_filepath[variable].dims
+        }
+        if len(new_chunking.keys()) > 0:
+            ds_filepath[variable] = ds_filepath[
+                variable
+            ].chunk(new_chunking)
+    return ds_filepath
 
 def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
     """
@@ -516,6 +510,8 @@ def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
     combined_ds = combined_ds.assign_coords(
         {"projected_y": (data_da.y.dims, data_da.y.values)}
     )
+    # combined_ds = combined_ds.fillna(0)
+
     return combined_ds
 
 
@@ -685,17 +681,12 @@ def _send_data_to_store(
     to_zarr_kwargs
         Additional keyword arguments passed to xr.Dataset.to_zarr(), by default None.
     """
-    # TODO: Add support for parallel sending
-    # TODO: Add support for zarr metadata
-
     # See https://stackoverflow.com/questions/66769922/concurrently-write-xarray-datasets-to-zarr-how-to-efficiently-scale-with-dask
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
         if client:
             futures = []
             for var in variables:
-                logging.info(f"XXXX_ {var} _XXXXXX_ {list(ds_filepath[var].sizes)}")
-
                 futures.append(
                     client.submit(
                         _send_variable,

@@ -3,12 +3,11 @@ import io
 import json
 import logging
 import os
-from typing import IO
+from typing import IO, List, Union
 
 import fsspec
 import numpy as np
 import s3fs
-
 
 class ObjectStoreS3(s3fs.S3FileSystem):
     """
@@ -23,10 +22,10 @@ class ObjectStoreS3(s3fs.S3FileSystem):
     def __init__(
         self,
         anon: bool = False,
-        store_credentials_json: str | None = None,
-        secret: str | None = None,
-        key: str | None = None,
-        endpoint_url: str | None = None,
+        store_credentials_json: Union[str, None] = None,
+        secret: Union[str, None] = None,
+        key: Union[str, None] = None,
+        endpoint_url: Union[str, None] = None,
         *fs_args,
         **fs_kwargs,
     ) -> None:
@@ -58,9 +57,7 @@ class ObjectStoreS3(s3fs.S3FileSystem):
                 "endpoint_url": endpoint_url,
             }
         else:
-            logging.info(
-                f"Reading object store credentials from {store_credentials_json}"
-            )
+            logging.info("Reading object store credentials from %s", store_credentials_json)
             self._store_credentials = self.load_store_credentials(
                 store_credentials_json
             )
@@ -97,8 +94,8 @@ class ObjectStoreS3(s3fs.S3FileSystem):
             if key not in store_credentials:
                 logging.info("-" * 79)
                 logging.warning(
-                    f'"{key}" is not a key in the JSON file provided. '
-                    + "Its value will be set to None."
+                    '"%s" is not a key in the JSON file provided. Its value will be set to None.',
+                    key
                 )
 
         return store_credentials
@@ -142,7 +139,7 @@ class ObjectStoreS3(s3fs.S3FileSystem):
         try:
             return self.mkdir(bucket, **kwargs)
         except FileExistsError:
-            logging.info(f"Bucket '{bucket}' already exists.")
+            logging.info("Bucket '%s' already exists.", bucket)
 
     def get_remote_options(self, override: bool = False) -> dict:
         """
@@ -185,7 +182,8 @@ class ObjectStoreS3(s3fs.S3FileSystem):
         prefix: str, default "s3://"
             Protocol prefix
         **get_mapper_kwargs
-            Kwargs for get_mapper. See: https://filesystem-spec.readthedocs.io/en/latest/api.html#fsspec.get_mapper.
+            Kwargs for get_mapper.
+            See: https://filesystem-spec.readthedocs.io/en/latest/api.html#fsspec.get_mapper.
 
         Returns
         -------
@@ -198,7 +196,7 @@ class ObjectStoreS3(s3fs.S3FileSystem):
 
         return mapper
 
-    def get_bucket_list(self) -> list[str]:
+    def get_bucket_list(self) -> List[str]:
         """
         Get the list of buckets in the object store.
 
@@ -209,9 +207,11 @@ class ObjectStoreS3(s3fs.S3FileSystem):
         """
         return self.ls("/")
 
+    from typing import Union
+
     def write_file_to_bucket(
         self,
-        path: str | os.PathLike | IO,
+        path: Union[str, os.PathLike, IO],
         bucket: str,
         file_name: str,
         chunk_size: int = -1,
@@ -259,7 +259,7 @@ class ObjectStoreS3(s3fs.S3FileSystem):
 
     def _write_to_bucket(
         self,
-        path: str | os.PathLike | IO,
+        path: Union[str, os.PathLike, IO],
         dest_path: str,
         chunks_offsets_lengths: dict,
         parallel: bool,
