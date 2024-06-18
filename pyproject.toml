@@ -21,6 +21,8 @@ dependencies = [
   "numpy>=1.23.5",
   "scitools-iris>=3.9.0",
   "tenacity>=8.3.0",
+  "intake",
+  "intake-xarray"
   ]
 
 dynamic = ["version"]
