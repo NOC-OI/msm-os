@@ -1,4 +1,5 @@
 """Argument parser module."""
+import json
 import argparse
 
 from ..__init__ import __version__
@@ -68,6 +69,23 @@ def create_parser():
         dest="variables",
         help="Variables to send.",
         nargs="+",
+        default=None,
+    )
+    parser.add_argument(
+        "-r",
+        "--reproject",
+        dest="reproject",
+        action='store_true',
+        help="If present, reproject data",
+        default=False,
+    )
+
+    parser.add_argument(
+        "-cs",
+        "--chunk-strategy",
+        dest="chunk_strategy",
+        help="Chunk strategy as a JSON string. E.g., '{\"time_counter\": 1, \"x\": 100, \"y\": 100}'",
+        type=json.loads,
         default=None,
     )
 

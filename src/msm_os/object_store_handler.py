@@ -47,7 +47,6 @@ retry_strategy = retry(
     reraise=True,
 )
 
-
 def update(
     filepaths: List[str],
     bucket: str,
@@ -101,7 +100,6 @@ def update(
 
             _update_data(ds_filepath, ds_obj_store, var, append_dim, mapper)
 
-
 def send(
     filepaths: List[str],
     bucket: str,
@@ -110,7 +108,9 @@ def send(
     send_vars_indep: bool = True,
     append_dim: str = "time_counter",
     object_prefix: Optional[str] = None,
-    client: Optional[Client] = None,
+    client: Optional[Client] = None,#
+    rechunk: dict = None,
+    reproject: bool = False,
     to_zarr_kwargs: Optional[dict] = None,
 ) -> None:
     """
@@ -134,6 +134,10 @@ def send(
         Prefix to be added to the object names in the object store, by default None.
     client
         Dask client, by default None.
+    rechunk
+        Rechunk strategy dictionary, by default None.
+    reproject
+        Whether to reproject the dataset, by default False.
     to_zarr_kwargs
         Additional keyword arguments passed to xr.Dataset.to_zarr(), by default None.
     """
@@ -159,6 +163,8 @@ def send(
             append_dim,
             send_vars_indep,
             client,
+            rechunk,
+            reproject,
             to_zarr_kwargs,
         )
 
@@ -273,6 +279,8 @@ def _send_variable(
     bucket: str,
     object_prefix: str,
     append_dim: str,
+    rechunk: dict,
+    reproject: bool = False,
 ) -> None:
     """
     Send a single variable to the object store.
@@ -291,6 +299,10 @@ def _send_variable(
         Prefix to be added to the object names in the object store.
     append_dim
         Name of the append dimension.
+    rechunk
+        Whether to rechunk the dataset.
+    reproject
+        Whether to reproject the dataset.
     """
     check_variable_exists(ds_filepath, var)
 
@@ -314,19 +326,21 @@ def _send_variable(
         try:
             ds_obj_store = xr.open_zarr(mapper)
             check_duplicates(ds_filepath, ds_obj_store, append_dim)
-            # Reproject the dataset to the expected projection
-            reprojected_ds_filepath = _reproject_ds(ds_filepath, var)
+            if reproject:
+                # Reproject the dataset to the expected projection
+                ds_filepath = _reproject_ds(ds_filepath, var)
 
             # Calculate expected size, variables, chunks and checksum
-            reprojected_ds_filepath = _calculate_metadata(
-                ds_obj_store, reprojected_ds_filepath, var, append_dim
+            ds_filepath = _calculate_metadata(
+                ds_obj_store, ds_filepath, var, append_dim
             )
 
             # Rechunk the dataset
-            reprojected_ds_filepath = _rechunk_ds(reprojected_ds_filepath)
+            if rechunk:
+                ds_filepath = _rechunk_ds(ds_filepath, rechunk)
 
             # Append the variable to the object store
-            reprojected_ds_filepath.to_zarr(
+            ds_filepath.to_zarr(
                 mapper, mode="a", append_dim=append_dim
             )
 
@@ -343,7 +357,7 @@ def _send_variable(
 
         # Check data integrity
         try:
-            check_data_integrity(mapper, var, append_dim, reprojected_ds_filepath)
+            check_data_integrity(mapper, var, append_dim, ds_filepath)
             logging.info("Data integrity check passed for %s", dest)
         except (ExpectedAttrsNotFound, DimensionMismatch, CheckSumMismatch) as error:
             if isinstance(error, ExpectedAttrsNotFound):
@@ -376,19 +390,19 @@ def _send_variable(
 
     except FileNotFoundError:
         logging.info("Creating %s", dest)
-        reprojected_ds_filepath = _reproject_ds(ds_filepath, var)
+        ds_filepath = _reproject_ds(ds_filepath, var)
 
-        reprojected_ds_filepath = _calculate_metadata(
-            xr.Dataset(), reprojected_ds_filepath, var, append_dim
+        ds_filepath = _calculate_metadata(
+            xr.Dataset(), ds_filepath, var, append_dim
         )
-
-        reprojected_ds_filepath = _rechunk_ds(reprojected_ds_filepath)
+        if rechunk:
+            ds_filepath = _rechunk_ds(ds_filepath, rechunk)
 
         # Append the variable to the object store
-        reprojected_ds_filepath.to_zarr(mapper, mode="a")
+        ds_filepath.to_zarr(mapper, mode="a")
 
 
-def _rechunk_ds(ds_filepath: xr.Dataset) -> xr.Dataset:
+def _rechunk_ds(ds_filepath: xr.Dataset, rechunk: dict) -> xr.Dataset:
     """ Rechunk the dataset.
 
     Args:
@@ -398,13 +412,13 @@ def _rechunk_ds(ds_filepath: xr.Dataset) -> xr.Dataset:
         xr.Dataset: The rechunked dataset.
     """
     # Apply custom chunking if the dimensions are present
-    chunking = {"x": 100, "y": 100, "time_counter": 1}
+    # chunking = {"x": 100, "y": 100, "time_counter": 1}
     variables = _get_update_variables(ds_filepath, None)
 
     for variable in variables:
         new_chunking = {
             dim: size
-            for dim, size in chunking.items()
+            for dim, size in rechunk.items()
             if dim in ds_filepath[variable].dims
         }
         if len(new_chunking.keys()) > 0:
@@ -655,6 +669,8 @@ def _send_data_to_store(
     append_dim: str,
     send_vars_indep: bool,
     client: Client,
+    rechunk: dict,
+    reproject: bool,
     to_zarr_kwargs: dict,
 ) -> None:
     """
@@ -678,8 +694,12 @@ def _send_data_to_store(
         Whether to send variables as separate objects.
     client
         Dask client.
+    rechunk
+        Rechunk strategy dictionary.
     to_zarr_kwargs
         Additional keyword arguments passed to xr.Dataset.to_zarr(), by default None.
+    reproject
+        Whether to reproject the dataset.
     """
     # See https://stackoverflow.com/questions/66769922/concurrently-write-xarray-datasets-to-zarr-how-to-efficiently-scale-with-dask
     if send_vars_indep:
@@ -696,13 +716,22 @@ def _send_data_to_store(
                         bucket,
                         object_prefix,
                         append_dim,
+                        rechunk,
+                        reproject
                     )
                 )
             client.gather(futures)
         else:
             for var in variables:
                 _send_variable(
-                    ds_filepath, obj_store, var, bucket, object_prefix, append_dim
+                    ds_filepath,
+                    obj_store,
+                    var,
+                    bucket,
+                    object_prefix,
+                    append_dim,
+                    rechunk,
+                    reproject
                 )
 
     else:
