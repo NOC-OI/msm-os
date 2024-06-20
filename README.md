@@ -84,6 +84,15 @@ The credentials file should contain the following information:
 
 Whenever new data is sent or updated in the object store, the code goes through several steps:
 
+
+### Reproject Data
+
+Some oceanographic models, such as NEMO, output data in different projections (e.g., tripolar grid). For certain uses, it may be beneficial to reproject the data to a regular grid like PlateCarree. If you choose to reproject your data, both the original and reprojected data will be retained in the output file.
+
+### Chunk Strategy
+
+If a chunk strategy is specified, the output data will be chunked accordingly. If no strategy is specified, the data will be chunked using the `auto` option from the `xarray.to_zarr` function.
+
 ### Check Data Integrity
 
 Every time new data is appended to an existing Zarr file, integrity checks are performed to verify if the metadata and data match the expected format.
@@ -93,11 +102,3 @@ Every time new data is appended to an existing Zarr file, integrity checks are p
 2. Data check: The checksum of the data in the NetCDF file is compared with the data in the Zarr file after upload. If they differ, an error is raised.
 
 If any errors are detected during these checks, the data is rolled back to the previous version. This rollback is performed directly in the Zarr file by updating the metadata to exclude the new data. The system will retry the upload twice more; if it fails again, a message is logged.
-
-### Reproject Data
-
-Some oceanographic models, such as NEMO, output data in different projections (e.g., tripolar grid). For certain uses, it may be beneficial to reproject the data to a regular grid like PlateCarree. If you choose to reproject your data, both the original and reprojected data will be retained in the output file.
-
-### Chunk Strategy
-
-If a chunk strategy is specified, the output data will be chunked accordingly. If no strategy is specified, the data will be chunked using the `auto` option from the `xarray.to_zarr` function.
