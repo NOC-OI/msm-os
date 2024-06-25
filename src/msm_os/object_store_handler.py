@@ -332,7 +332,7 @@ def _send_variable(
 
             # Calculate expected size, variables, chunks and checksum
             ds_filepath = _calculate_metadata(
-                ds_obj_store, ds_filepath, var, append_dim
+                ds_obj_store, ds_filepath, var, append_dim, reproject
             )
 
             # Rechunk the dataset
@@ -393,7 +393,7 @@ def _send_variable(
         ds_filepath = _reproject_ds(ds_filepath, var)
 
         ds_filepath = _calculate_metadata(
-            xr.Dataset(), ds_filepath, var, append_dim
+            xr.Dataset(), ds_filepath, var, append_dim, reproject
         )
         if rechunk:
             ds_filepath = _rechunk_ds(ds_filepath, rechunk)
@@ -530,7 +530,11 @@ def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
 
 
 def _calculate_metadata(
-    ds_obj_store: xr.Dataset, ds_filepath: xr.Dataset, var: str, append_dim: str
+    ds_obj_store: xr.Dataset,
+    ds_filepath: xr.Dataset,
+    var: str,
+    append_dim: str,
+    reproject: bool
 ) -> xr.Dataset:
     """
     Calculate metadata for the dataset.
@@ -569,10 +573,11 @@ def _calculate_metadata(
     data_bytes = ds_filepath[var].values.tobytes()
     expected_checksum = np.frombuffer(data_bytes, dtype=np.uint32).sum()
     if "y" in list(ds_filepath.sizes):
-        data_bytes_reprojected = ds_filepath[f"projected_{var}"].values.tobytes()
-        expected_checksum += np.frombuffer(
-            data_bytes_reprojected, dtype=np.uint32
-        ).sum()
+        if reproject:
+            data_bytes_reprojected = ds_filepath[f"projected_{var}"].values.tobytes()
+            expected_checksum += np.frombuffer(
+                data_bytes_reprojected, dtype=np.uint32
+            ).sum()
 
     if append_dim in list(ds_filepath[var].sizes):
         ds_filepath.attrs[
