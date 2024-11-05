@@ -79,7 +79,7 @@ def create_parser():
         help="If present, reproject data",
         default=False,
     )
-    
+
     parser.add_argument(
         "-si",
         "--skip-integrity-check",
@@ -94,6 +94,15 @@ def create_parser():
         "--chunk-strategy",
         dest="chunk_strategy",
         help="Chunk strategy as a JSON string. E.g., '{\"time_counter\": 1, \"x\": 100, \"y\": 100}'",
+        type=json.loads,
+        default=None,
+    )
+
+    parser.add_argument(
+        "-j",
+        "--job",
+        dest="job",
+        help="Client as a JSON string. E.g., '{\"queue\": \"par-single\", \"cores\": 16, \"processes\": 4, \"memory\": \"256GB\", \"scale\": 1}'",
         type=json.loads,
         default=None,
     )

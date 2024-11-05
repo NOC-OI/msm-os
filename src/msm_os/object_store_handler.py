@@ -109,7 +109,7 @@ def send(
     send_vars_indep: bool = True,
     append_dim: str = "time_counter",
     object_prefix: Optional[str] = None,
-    client: Optional[Client] = None,#
+    client: Optional[Client] = None,
     rechunk: dict = None,
     reproject: bool = False,
     skip_integrity_check: bool = False,
@@ -296,7 +296,7 @@ def _send_variable(
     Parameters
     ----------
     ds_filepath
-        Filepath to the local dataset.
+        Filepath to the local dataset for the selected variable.
     obj_store
         Object store.
     var
@@ -315,8 +315,6 @@ def _send_variable(
     skip_integrity_check
         Whether to skip the data integrity check.
     """
-    check_variable_exists(ds_filepath, var)
-    ds_filepath_var = ds_filepath[[var]]
 
     dest = f"{bucket}/{object_prefix}/{var}.zarr"
     mapper = obj_store.get_mapper(dest)
@@ -324,7 +322,7 @@ def _send_variable(
     try:
         check_destination_exists(obj_store, dest)
 
-        if append_dim not in ds_filepath_var.dims:
+        if append_dim not in ds_filepath.dims:
             logging.info(
                 "Skipping %s because %s is not in the dimensions of %s",
                 dest,
@@ -337,15 +335,15 @@ def _send_variable(
 
         try:
             ds_obj_store = xr.open_zarr(mapper)
-            ds_filepath_var = check_duplicates(ds_filepath_var, ds_obj_store, append_dim)
+            ds_filepath = check_duplicates(ds_filepath, ds_obj_store, append_dim)
             if reproject:
                 # Reproject the dataset to the expected projection
-                ds_filepath_var = _reproject_ds(ds_filepath_var, var)
+                ds_filepath = _reproject_ds(ds_filepath, var)
 
             # Calculate expected size, variables, chunks and checksum
             if not skip_integrity_check:
-                ds_filepath_var = calculate_metadata(
-                    ds_obj_store, ds_filepath_var, var, append_dim, reproject
+                ds_filepath = calculate_metadata(
+                    ds_obj_store, ds_filepath, var, append_dim, reproject
                 )
 
             # Rechunk the dataset
@@ -355,7 +353,7 @@ def _send_variable(
                 new_chunking = {
                     dim: size
                     for dim, size in rechunk.items()
-                    if dim in ds_filepath[var].dims
+                    if dim in ds_filepath.dims
                 }
 
                 chunks_differ = any(
@@ -367,10 +365,10 @@ def _send_variable(
                     logging.warning("The actual data on the object store has chunk size: %s", actual_data_chunksize)
                     logging.warning("And you are trying to rechunk it to: %s", new_chunking)
                     logging.warning("You can't rechunk the data on the object store")
-                # ds_filepath_var = _rechunk_ds(ds_filepath_var, rechunk)
+                # ds_filepath = _rechunk_ds(ds_filepath, rechunk)
 
             # Append the variable to the object store
-            ds_filepath_var.to_zarr(
+            ds_filepath.to_zarr(
                 mapper, mode="a", append_dim=append_dim
             )
             first_file = False
@@ -391,27 +389,27 @@ def _send_variable(
 
         if reproject:
             # Reproject the dataset to the expected projection
-            ds_filepath_var = _reproject_ds(ds_filepath_var, var)
+            ds_filepath = _reproject_ds(ds_filepath, var)
         if not skip_integrity_check:
-            ds_filepath_var = calculate_metadata(
+            ds_filepath = calculate_metadata(
                 xr.Dataset(),
-                ds_filepath_var,
+                ds_filepath,
                 var,
                 append_dim,
                 reproject,
                 first_file
             )
         if rechunk:
-            ds_filepath_var = _rechunk_ds(ds_filepath_var, rechunk)
+            ds_filepath = _rechunk_ds(ds_filepath, rechunk, first_file)
 
-        ds_filepath_var.to_zarr(mapper, mode="a")
+        ds_filepath.to_zarr(mapper, mode="a")
 
     if not skip_integrity_check:
         try:
             data_integrity_evaluation(var,
                                     append_dim,
                                     mapper,
-                                    ds_filepath_var,
+                                    ds_filepath,
                                     dest,
                                     reproject,
                                     first_file)
@@ -430,11 +428,13 @@ def _send_variable(
         logging.warning("As requested, skipping data integrity check for %s", dest)
 
 
-def _rechunk_ds(ds_filepath: xr.Dataset, rechunk: dict) -> xr.Dataset:
+def _rechunk_ds(ds_filepath: xr.Dataset,
+                rechunk: dict) -> xr.Dataset:
     """ Rechunk the dataset.
 
     Args:
         ds_filepath (xr.Dataset): The dataset to be rechunked.
+        recunk (dict): The rechunk strategy dictionary.
 
     Returns:
         xr.Dataset: The rechunked dataset.
@@ -452,7 +452,7 @@ def _rechunk_ds(ds_filepath: xr.Dataset, rechunk: dict) -> xr.Dataset:
             ds_filepath[variable] = ds_filepath[
                 variable
             ].chunk(new_chunking)
-            
+
     return ds_filepath
 
 def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
@@ -652,12 +652,17 @@ def _send_data_to_store(
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
         if client:
+            scattered_data = {}
+            for var in variables:
+                check_variable_exists(ds_filepath, var)
+                ds_filepath_var = ds_filepath[[var]]
+                scattered_data[var] = client.scatter(ds_filepath_var)
             futures = []
             for var in variables:
                 futures.append(
                     client.submit(
                         _send_variable,
-                        ds_filepath,
+                        scattered_data[var],
                         obj_store,
                         var,
                         bucket,
@@ -671,8 +676,10 @@ def _send_data_to_store(
             client.gather(futures)
         else:
             for var in variables:
+                check_variable_exists(ds_filepath, var)
+                ds_filepath_var = ds_filepath[[var]]
                 _send_variable(
-                    ds_filepath,
+                    ds_filepath_var,
                     obj_store,
                     var,
                     bucket,
