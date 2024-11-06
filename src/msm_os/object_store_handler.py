@@ -428,23 +428,15 @@ def _send_variable(
             )
             return
         except ClientError as e:
-            logging.error(f"Failed to upload to S3: {e}")
-            if e.response['Error']['Code'] == 'NoSuchBucket':
-                logging.error("The specified S3 bucket does not exist.")
-            elif e.response['Error']['Code'] == 'AccessDenied':
-                logging.error("Access denied for the specified S3 path.")
+            logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
+            logging.error("Skipping %s", dest)
             raise e
         except OSError as e:
-            logging.error(f"Failed to upload to S3: {e}")
-            if e.response['Error']['Code'] == 'NoSuchBucket':
-                logging.error("The specified S3 bucket does not exist.")
-            elif e.response['Error']['Code'] == 'AccessDenied':
-                logging.error("Access denied for the specified S3 path.")
-            raise e
-
-        except Exception as e:
-            logging.error(f"Failed to send variable '{var}': {e}")
+            logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
             logging.error("Skipping %s", dest)
+            raise e
+        except Exception as e:
+            logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
             logging.error("Error type: %s", type(e).__name__)
             logging.error("Error: %s", e)
             return
