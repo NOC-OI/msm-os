@@ -437,6 +437,7 @@ def _send_variable(
         except Exception as e:
             logging.error(f"Failed to send variable '{var}': {e}")
             logging.error("Skipping %s", dest)
+            logging.error("Error type: %s", type(e).__name__)
             logging.error("Error: %s", e)
             return
 
@@ -481,8 +482,8 @@ def _send_variable(
                                 object_prefix,
                                 var,
                                 append_dim)
-    else:
-        logging.warning("As requested, skipping data integrity check for %s", dest)
+    # else:
+    #     logging.warning("As requested, skipping data integrity check for %s", dest)
 
 
 def _rechunk_ds(ds_filepath: xr.Dataset,

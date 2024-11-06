@@ -28,11 +28,6 @@ start_time_script=$(date +%s)
 # Get file list
 file_list=$(find $GLOB_EXPR -maxdepth 2 -type f -name "*.nc" | sort)
 
-# Check if OUTPUT directory exists and that it contains NetCDF files
-if [ ! -z "${file_list}" ]; then
-    echo "Error: No .nc files found in OUTPUT directory"
-    exit 1
-fi
 
 total_files=$(echo "$file_list" | wc -l)
 source activate /home/users/tobfer/cylc-run/M9/M9/etc/miniconda/envs/portable_env_cylc
@@ -45,8 +40,7 @@ for file in $file_list; do
 
     echo -e "Progress: $percentage %"
     echo -e "Sending ${file}"
-    msm_os send -f ${file} -c ${CREDENTIALS} -b ${BUCKET} -cs "${CHUNK_STRATEGY}" -j "${JOB_CONFIG}" -si >> ${MSM_OS_OUPUT}.output 2>> ${MSM_OS_OUPUT}.errors
-
+    msm_os send -f ${file} -c ${CREDENTIALS} -b ${BUCKET} -cs "${CHUNK_STRATEGY}" -j "${JOB_CONFIG}" -si
 
     # Get end time for the current iteration
     end_time_iteration=$(date +%s)
