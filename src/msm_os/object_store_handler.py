@@ -34,6 +34,7 @@ from .sanity_checks import (
 try:
     from dask.distributed import Client
     from dask.distributed import KilledWorker
+    from dask import delayed
 except ImportError:
     logging.warning(
         "Dask is not installed. Please install it to use parallel features."
@@ -278,7 +279,30 @@ def _update_data(
     logging.info("Skipping %s because region not found in object store", mapper.root)
 
 
-@retry_strategy
+@delayed
+def delayed_send_variable(
+    ds_filepath,
+    obj_store,
+    var,
+    bucket,
+    object_prefix,
+    append_dim,
+    rechunk,
+    reproject,
+    skip_integrity_check
+):
+    return _send_variable(
+        ds_filepath,
+        obj_store,
+        var,
+        bucket,
+        object_prefix,
+        append_dim,
+        rechunk,
+        reproject,
+        skip_integrity_check
+    )
+
 def _send_variable(
     ds_filepath: xr.Dataset,
     obj_store: ObjectStoreS3,
@@ -661,8 +685,7 @@ def _send_data_to_store(
             for var in variables:
                 # ds_filepath_var = ds_filepath[[var]]
                 futures.append(
-                    client.submit(
-                        _send_variable,
+                    delayed_send_variable(
                         # ds_filepath_var,
                         scattered_data[var],
                         obj_store,
@@ -675,7 +698,22 @@ def _send_data_to_store(
                         skip_integrity_check
                     )
                 )
-            client.gather(futures)
+            results = client.gather(futures)
+            try:
+                for result in results:
+                    if result is None:
+                        logging.info("Task completed successfully.")
+                    else:
+                        logging.warning("Unexpected result received: %s", result)
+            except Exception as e:
+                logging.error("An error occurred during task execution: %s", str(e))
+
+            all_successful = all(result is None for result in results)
+
+            if all_successful:
+                logging.info("All tasks completed successfully.")
+            else:
+                logging.warning("Some tasks failed or returned unexpected results.")
         else:
             for var in variables:
                 check_variable_exists(ds_filepath, var)
