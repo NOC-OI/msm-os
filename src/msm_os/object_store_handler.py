@@ -678,24 +678,51 @@ def _send_data_to_store(
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
         if client:
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                futures = [
-                    executor.submit(
-                        _send_variable,
-                        ds_filepath[[var]],
-                        obj_store,
-                        var,
-                        bucket,
-                        object_prefix,
-                        append_dim,
-                        rechunk,
-                        reproject,
-                        skip_integrity_check
+            if client["type"] == "slurm":
+                # scattered_data = {}
+                # for var in variables:
+                #     check_variable_exists(ds_filepath, var)
+                #     ds_filepath_var = ds_filepath[[var]]
+                #     scattered_data[var] = client.scatter(ds_filepath_var)
+                futures = []
+                for var in variables:
+                    ds_filepath_var = ds_filepath[[var]]
+                    futures.append(
+                        client.submit(
+                            _send_variable,
+                            ds_filepath_var, # scattered_data[var],
+                            obj_store,
+                            var,
+                            bucket,
+                            object_prefix,
+                            append_dim,
+                            rechunk,
+                            reproject,
+                            skip_integrity_check
+                        )
                     )
-                    for var in variables
-                ]
-                for future in tqdm(as_completed(futures), desc="Processing variables", total=len(futures)):
-                    future.result()
+                client.gather(futures)
+            elif client["type"] == "threads":
+                with ThreadPoolExecutor(max_workers=client["client"]) as executor:
+                    futures = [
+                        executor.submit(
+                            _send_variable,
+                            ds_filepath[[var]],
+                            obj_store,
+                            var,
+                            bucket,
+                            object_prefix,
+                            append_dim,
+                            rechunk,
+                            reproject,
+                            skip_integrity_check
+                        )
+                        for var in variables
+                    ]
+                    for future in tqdm(as_completed(futures), desc="Processing variables", total=len(futures)):
+                        future.result()
+            else:
+                raise ValueError(f"Job type {client['type']} not supported.")
         else:
             for var in variables:
                 check_variable_exists(ds_filepath, var)

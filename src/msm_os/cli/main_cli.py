@@ -40,15 +40,8 @@ def initialise_logging():
     )
 
 
-def parse_job(job: dict) -> Client:
-    """Parse the job configuration.
-
-    Args:
-        job (dict): Job configuration.
-
-    Returns:
-        dask.distributed.Client: Dask client.
-    """
+def parse_slurm_job(job: dict) -> Client:
+    job_type = job.get("type")
     queue = job.get("queue", "par-single")
     cores = job.get("cores", 16)
     processes = job.get("processes", round(math.sqrt(cores)))
@@ -70,6 +63,30 @@ def parse_job(job: dict) -> Client:
     cluster.scale(jobs=scale)
     client = Client(cluster)
     return client
+
+def parse_job(job: dict) -> Client:
+    """Parse the job configuration.
+
+    Args:
+        job (dict): Job configuration.
+
+    Returns:
+        dask.distributed.Client: Dask client.
+    """
+    job_type = job.get("type", "local")
+    if job_type == "slurm":
+        client = parse_slurm_job(job)
+    elif job_type == "local":
+        client = Client()
+    elif job_type == "threads":
+        client = job.get("num_threads", 4)
+    else:
+        raise ValueError(f"Job type {job_type} not supported.")
+    return {
+        "type": job_type,
+        "client": client,
+        "job": job,
+    }
 
 def process_action(args):
     """Process the selected action."""
