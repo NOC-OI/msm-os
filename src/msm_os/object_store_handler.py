@@ -10,11 +10,14 @@ import iris
 import cartopy.crs as ccrs
 import cf_units
 import zarr
+from botocore.exceptions import ClientError
+import requests
 from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
+    wait_fixed,
 )
 from .exceptions import (
     DuplicatedAppendDimValue,
@@ -281,8 +284,7 @@ def _update_data(
     logging.info("Skipping %s because region not found in object store", mapper.root)
 
 
-@delayed
-def delayed_send_variable(
+def main_send_variable(
     ds_filepath,
     obj_store,
     var,
@@ -293,18 +295,34 @@ def delayed_send_variable(
     reproject,
     skip_integrity_check
 ):
-    return _send_variable(
-        ds_filepath,
-        obj_store,
-        var,
-        bucket,
-        object_prefix,
-        append_dim,
-        rechunk,
-        reproject,
-        skip_integrity_check
-    )
+    """
+    Wrapper function to call _send_variable with external error handling.
+    This ensures graceful handling if retries are exhausted.
+    """
+    try:
+        _send_variable(
+            ds_filepath=ds_filepath,
+            obj_store=obj_store,
+            var=var,
+            bucket=bucket,
+            object_prefix=object_prefix,
+            append_dim=append_dim,
+            rechunk=rechunk,
+            reproject=reproject,
+            skip_integrity_check=skip_integrity_check,
+        )
+    except (ClientError, requests.ConnectionError) as e:
+        # Log failure after exhausting retries and exit gracefully
+        logging.error(f"Failed to send variable '{var}' after multiple retries: {e}")
+        return  # Exit gracefully without raising the exception further
 
+
+# Retry 3 times with 2 seconds between retries
+@retry(
+    retry=retry_if_exception_type((ClientError, requests.ConnectionError)),
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(2)  # Retry 3 times with 2 seconds between retries
+)
 def _send_variable(
     ds_filepath: xr.Dataset,
     obj_store: ObjectStoreS3,
@@ -409,6 +427,19 @@ def _send_variable(
                 "Skipping %s due to no %s on data dimensions", dest, append_dim
             )
             return
+        except ClientError as e:
+            logging.error(f"Failed to upload to S3: {e}")
+            if e.response['Error']['Code'] == 'NoSuchBucket':
+                logging.error("The specified S3 bucket does not exist.")
+            elif e.response['Error']['Code'] == 'AccessDenied':
+                logging.error("Access denied for the specified S3 path.")
+            raise e
+        except Exception as e:
+            logging.error(f"Failed to send variable '{var}': {e}")
+            logging.error("Skipping %s", dest)
+            logging.error("Error: %s", e)
+            return
+
     except FileNotFoundError:
         logging.info("Creating %s", dest)
         first_file = True
@@ -689,7 +720,7 @@ def _send_data_to_store(
                     ds_filepath_var = ds_filepath[[var]]
                     futures.append(
                         client.submit(
-                            _send_variable,
+                            main_send_variable,
                             ds_filepath_var, # scattered_data[var],
                             obj_store,
                             var,
@@ -706,7 +737,7 @@ def _send_data_to_store(
                 with ThreadPoolExecutor(max_workers=client["client"]) as executor:
                     futures = [
                         executor.submit(
-                            _send_variable,
+                            main_send_variable,
                             ds_filepath[[var]],
                             obj_store,
                             var,
@@ -727,7 +758,7 @@ def _send_data_to_store(
             for var in variables:
                 check_variable_exists(ds_filepath, var)
                 ds_filepath_var = ds_filepath[[var]]
-                _send_variable(
+                main_send_variable(
                     ds_filepath_var,
                     obj_store,
                     var,
