@@ -48,7 +48,9 @@ def parse_slurm_job(job: dict) -> Client:
     memory = job.get("memory", "256GB")
     scale = job.get("scale", 1)
     logging.info(
-        f"Creating a SLURM cluster with {cores} cores, {processes} processes, {memory} of memory, and {scale} jobs.")
+        "Creating a SLURM cluster with %d cores, %d processes, %s of memory, and %d jobs.",
+        cores, processes, memory, scale
+    )
     cluster = SLURMCluster(
         queue=queue,
         cores=cores,
@@ -73,13 +75,14 @@ def parse_job(job: dict) -> Client:
     Returns:
         dask.distributed.Client: Dask client.
     """
-    job_type = job.get("type", "local")
+    job_type = job.get("type", None)
     if job_type == "slurm":
         client = parse_slurm_job(job)
     elif job_type == "local":
-        client = Client()
+        raise NotImplementedError("Local client not implemented.")
     elif job_type == "threads":
         client = job.get("num_threads", 4)
+        logging.info("Creating a threads client with %s threads.", client)
     else:
         raise ValueError(f"Job type {job_type} not supported.")
     return {
@@ -106,7 +109,6 @@ def process_action(args):
             client = parse_job(args.job)
         else:
             client = None
-
         send(
             filepaths=list(args.filepaths),
             bucket=args.bucket,
