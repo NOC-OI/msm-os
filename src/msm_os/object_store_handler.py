@@ -311,7 +311,7 @@ def main_send_variable(
             reproject=reproject,
             skip_integrity_check=skip_integrity_check,
         )
-    except (ClientError, requests.ConnectionError) as e:
+    except (ClientError, requests.ConnectionError, OSError) as e:
         # Log failure after exhausting retries and exit gracefully
         logging.error(f"Failed to send variable '{var}' after multiple retries: {e}")
         return  # Exit gracefully without raising the exception further
@@ -319,7 +319,7 @@ def main_send_variable(
 
 # Retry 3 times with 2 seconds between retries
 @retry(
-    retry=retry_if_exception_type((ClientError, requests.ConnectionError)),
+    retry=retry_if_exception_type((ClientError, requests.ConnectionError, OSError)),
     stop=stop_after_attempt(3),
     wait=wait_fixed(2)  # Retry 3 times with 2 seconds between retries
 )
@@ -434,6 +434,14 @@ def _send_variable(
             elif e.response['Error']['Code'] == 'AccessDenied':
                 logging.error("Access denied for the specified S3 path.")
             raise e
+        except OSError as e:
+            logging.error(f"Failed to upload to S3: {e}")
+            if e.response['Error']['Code'] == 'NoSuchBucket':
+                logging.error("The specified S3 bucket does not exist.")
+            elif e.response['Error']['Code'] == 'AccessDenied':
+                logging.error("Access denied for the specified S3 path.")
+            raise e
+
         except Exception as e:
             logging.error(f"Failed to send variable '{var}': {e}")
             logging.error("Skipping %s", dest)
