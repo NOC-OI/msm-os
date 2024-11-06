@@ -652,18 +652,19 @@ def _send_data_to_store(
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
         if client:
-            # scattered_data = {}
-            # for var in variables:
-            #     check_variable_exists(ds_filepath, var)
-            #     ds_filepath_var = ds_filepath[[var]]
-            #     scattered_data[var] = client.scatter(ds_filepath_var)
+            scattered_data = {}
+            for var in variables:
+                check_variable_exists(ds_filepath, var)
+                ds_filepath_var = ds_filepath[[var]]
+                scattered_data[var] = client.scatter(ds_filepath_var)
             futures = []
             for var in variables:
-                ds_filepath_var = ds_filepath[[var]]
+                # ds_filepath_var = ds_filepath[[var]]
                 futures.append(
                     client.submit(
                         _send_variable,
-                        ds_filepath_var, # scattered_data[var],
+                        # ds_filepath_var,
+                        scattered_data[var],
                         obj_store,
                         var,
                         bucket,
