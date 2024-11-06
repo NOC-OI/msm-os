@@ -400,7 +400,7 @@ def _send_variable(
                 first_file
             )
         if rechunk:
-            ds_filepath = _rechunk_ds(ds_filepath, rechunk, first_file)
+            ds_filepath = _rechunk_ds(ds_filepath, rechunk)
 
         ds_filepath.to_zarr(mapper, mode="a")
 
