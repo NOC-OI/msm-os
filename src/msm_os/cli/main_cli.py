@@ -54,6 +54,8 @@ def parse_job(job: dict) -> Client:
     processes = job.get("processes", round(math.sqrt(cores)))
     memory = job.get("memory", "256GB")
     scale = job.get("scale", 1)
+    logging.info(
+        f"Creating a SLURM cluster with {cores} cores, {processes} processes, {memory} of memory, and {scale} jobs.")
     cluster = SLURMCluster(
         queue=queue,
         cores=cores,
