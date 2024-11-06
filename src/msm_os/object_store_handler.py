@@ -311,7 +311,7 @@ def main_send_variable(
             reproject=reproject,
             skip_integrity_check=skip_integrity_check,
         )
-    except (ClientError, requests.ConnectionError, OSError) as e:
+    except Exception as e:
         # Log failure after exhausting retries and exit gracefully
         logging.error(f"Failed to send variable '{var}' after multiple retries: {e}")
         return  # Exit gracefully without raising the exception further
@@ -319,7 +319,8 @@ def main_send_variable(
 
 # Retry 3 times with 2 seconds between retries
 @retry(
-    retry=retry_if_exception_type((ClientError, requests.ConnectionError, OSError)),
+    # retry=retry_if_exception_type((ClientError, requests.ConnectionError, OSError)),
+    retry=retry_if_exception_type(Exception),
     stop=stop_after_attempt(3),
     wait=wait_fixed(2)  # Retry 3 times with 2 seconds between retries
 )
@@ -427,19 +428,19 @@ def _send_variable(
                 "Skipping %s due to no %s on data dimensions", dest, append_dim
             )
             return
-        except ClientError as e:
-            logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
-            logging.error("Skipping %s", dest)
-            raise e
-        except OSError as e:
-            logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
-            logging.error("Skipping %s", dest)
-            raise e
+        # except ClientError as e:
+        #     logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
+        #     logging.error("The retry decorator will retry the function if it is not the last attempt.")
+        #     raise e
+        # except OSError as e:
+        #     logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
+        #     logging.error("The retry decorator will retry the function if it is not the last attempt.")
+        #     raise e
         except Exception as e:
             logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
             logging.error("Error type: %s", type(e).__name__)
             logging.error("Error: %s", e)
-            return
+            raise e
 
     except FileNotFoundError:
         logging.info("Creating %s", dest)
