@@ -35,6 +35,8 @@ try:
     from dask.distributed import Client
     from dask.distributed import KilledWorker
     from dask import delayed
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from tqdm import tqdm
 except ImportError:
     logging.warning(
         "Dask is not installed. Please install it to use parallel features."
@@ -676,18 +678,11 @@ def _send_data_to_store(
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
         if client:
-            # scattered_data = {}
-            # for var in variables:
-            #     check_variable_exists(ds_filepath, var)
-            #     ds_filepath_var = ds_filepath[[var]]
-            #     scattered_data[var] = client.scatter(ds_filepath_var)
-            futures = []
-            for var in variables:
-                ds_filepath_var = ds_filepath[[var]]
-                futures.append(
-                    delayed_send_variable(
-                        ds_filepath_var,
-                        # scattered_data[var],
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [
+                    executor.submit(
+                        _send_variable,
+                        ds_filepath[[var]],
                         obj_store,
                         var,
                         bucket,
@@ -697,23 +692,10 @@ def _send_data_to_store(
                         reproject,
                         skip_integrity_check
                     )
-                )
-            results = client.gather(futures)
-            try:
-                for result in results:
-                    if result is None:
-                        logging.info("Task completed successfully.")
-                    else:
-                        logging.warning("Unexpected result received: %s", result)
-            except Exception as e:
-                logging.error("An error occurred during task execution: %s", str(e))
-
-            all_successful = all(result is None for result in results)
-
-            if all_successful:
-                logging.info("All tasks completed successfully.")
-            else:
-                logging.warning("Some tasks failed or returned unexpected results.")
+                    for var in variables
+                ]
+                for future in tqdm(as_completed(futures), desc="Processing variables", total=len(futures)):
+                    future.result()
         else:
             for var in variables:
                 check_variable_exists(ds_filepath, var)
