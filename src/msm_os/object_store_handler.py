@@ -250,7 +250,7 @@ def send_with_dask(
         # Open multi-file dataset as dask.delayed object:
         if rechunk is None:
             ds_filepath = xr.open_mfdataset(filepaths,
-                                            engine='h5netcdf',
+                                            engine='netcdf4',
                                             parallel=True,
                                             concat_dim=append_dim,
                                             combine='nested',
@@ -260,8 +260,8 @@ def send_with_dask(
                                             )
         else:
             ds_filepath = xr.open_mfdataset(filepaths,
+                                            engine='netcdf4',
                                             chunks=rechunk,
-                                            engine='h5netcdf',
                                             parallel=True,
                                             concat_dim=append_dim,
                                             combine='nested',
@@ -272,12 +272,15 @@ def send_with_dask(
         
         if send_vars_indep:
             # === Send variables to object store === #
-            if variables == 'all':
+            if variables is None:
                 # Get variable names:
                 variables = list(ds_filepath.data_vars)
 
             # Write each variable to a separate zarr store:
             for var in variables:
+                logging.info(
+                'Sending Variable %s', var
+                )
                 # Define S3 mapping:
                 dest = f"{bucket}/{object_prefix}/{var}"
                 mapper = obj_store.get_mapper(dest)
@@ -299,6 +302,9 @@ def send_with_dask(
                     logging.info(
                         'Completed: Sent Variable %s in %s', dest, t_end-t_start
                         )
+
+                # Release resources to avoid memory leaks:
+                ds_filepath.close()
             
         else:
             # === Send Dataset to object store === #
@@ -323,6 +329,9 @@ def send_with_dask(
                 logging.info(
                     'Completed: Sent Dataset to s3://%s in %s', dest, t_end-t_start
                     )
+
+            # Release resources to avoid memory leaks:
+            ds_filepath.close()
             
         # === Shutdown Dask Cluster === #
         client.shutdown()
