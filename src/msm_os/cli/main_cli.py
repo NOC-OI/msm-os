@@ -83,6 +83,8 @@ def process_action(args):
             variables=variables,
             append_dim=args.append_dim,
             send_vars_indep=not send_vars_indep,
+            grid_filepath=args.grid_filepath,
+            update_coords=args.update_coords,
             object_prefix=args.object_prefix,
             rechunk=args.chunk_strategy,
             dask_config_kwargs=args.dask_config_kwargs,
