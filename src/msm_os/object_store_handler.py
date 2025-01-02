@@ -184,6 +184,8 @@ def send_with_dask(
     store_credentials_json: str,
     variables: Optional[List[str]] = 'all',
     send_vars_indep: bool = True,
+    grid_filepath: Optional[str] = None,
+    update_coords: Optional[dict] = None,
     append_dim: str = "time_counter",
     dask_config_kwargs: Optional[dict] = None,
     dask_cluster_kwargs: Optional[dict] = None,
@@ -206,6 +208,10 @@ def send_with_dask(
         List of variables to send. If None, all variables will be sent, by default None.
     send_vars_indep
         Whether to send variables as separate objects, by default True.
+    grid_filepath
+        Path to file containing model grid parameter, by default None.
+    update_coords
+        Dictionary of coordinate variables to update, by default None.
     append_dim
         Name of the append dimension, by default "time_counter".
     object_prefix
@@ -269,6 +275,33 @@ def send_with_dask(
                                             coords='minimal',
                                             compat='override'
                                             )
+
+        if update_coords is not None:
+            # === Update coordinates using model grid file === #
+            if grid_filepath is None:
+                raise ValueError(
+                    "grid_filepath must be provided to update coordinate variables."
+                    )
+            else:
+                ds_grid = xr.open_dataset(grid_filepath)
+            # Update coordinate variables using model grid parameters:
+            for key in update_coords.keys():
+                coord_data = ds_grid[update_coords[key]].squeeze()
+                # Rechunk dimensions to user specified chunks:
+                if rechunk is not None:
+                    coord_chunks = {dim: rechunk[dim] for dim in coord_data.dims}
+                    # Assign new chunked coordinates to dataset:
+                    ds_filepath = ds_filepath.assign_coords(
+                        {key: coord_data.chunk(coord_chunks)}
+                        )
+                else:
+                    # Assign new unchunked coordinates to dataset:
+                    ds_filepath = ds_filepath.assign_coords(
+                        {key: coord_data}
+                        )
+            logging.info(
+            'Completed: Updated coordinate variables.'
+            )
         
         if send_vars_indep:
             # === Send variables to object store === #
