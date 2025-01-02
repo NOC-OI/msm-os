@@ -116,4 +116,21 @@ def create_parser():
         default=None,
     )
 
+    parser.add_argument(
+        "-gf",
+        "--grid-filepath",
+        dest="grid_filepath",
+        help="File path to model grid file containing domain information.",
+        default=None,
+    )
+
+    parser.add_argument(
+        "-uc",
+        "--update-coords",
+        dest="update_coords",
+        help="Coordinate dimensions to update as a JSON string. E.g., '{\"nav_lon\": \"glamt\", \"nav_lat\": \"gphit\"}'",
+        type=json.loads,
+        default=None,
+    )
+
     return parser
