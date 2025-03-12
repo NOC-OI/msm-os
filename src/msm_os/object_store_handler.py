@@ -318,26 +318,31 @@ def send_with_dask(
                 dest = f"{bucket}/{object_prefix}/{var}"
                 mapper = obj_store.get_mapper(dest)
 
-                try:
-                    # Append to existing zarr store:
-                    check_destination_exists(obj_store, dest)
-                    t_start = time.time()
-                    ds_filepath[var].to_zarr(mapper, append_dim=append_dim, consolidated=True)
-                    t_end = time.time()
+                if obj_store.exists(dest):
                     logging.info(
-                        'Completed: Sent Variable %s in %s', dest, t_end-t_start
-                        )
+                            'Skipping: Variable exists in %s', dest
+                            )
+                else:
+                    try:
+                        # Append to existing zarr store:
+                        check_destination_exists(obj_store, dest)
+                        t_start = time.time()
+                        ds_filepath[var].to_zarr(mapper, append_dim=append_dim, consolidated=True)
+                        t_end = time.time()
+                        logging.info(
+                            'Completed: Sent Variable %s in %s', dest, t_end-t_start
+                            )
 
-                except FileNotFoundError:
-                    t_start = time.time()
-                    ds_filepath[var].to_zarr(mapper, mode='w', consolidated=True)
-                    t_end = time.time()
-                    logging.info(
-                        'Completed: Sent Variable %s in %s', dest, t_end-t_start
-                        )
+                    except FileNotFoundError:
+                        t_start = time.time()
+                        ds_filepath[var].to_zarr(mapper, mode='w', consolidated=True)
+                        t_end = time.time()
+                        logging.info(
+                            'Completed: Sent Variable %s in %s', dest, t_end-t_start
+                            )
 
-                # Release resources to avoid memory leaks:
-                ds_filepath.close()
+                    # Release resources to avoid memory leaks:
+                    ds_filepath.close()
             
         else:
             # === Send Dataset to object store === #
@@ -345,26 +350,31 @@ def send_with_dask(
             dest = f"{bucket}/{object_prefix}"
             mapper = obj_store.get_mapper(dest)
 
-            try:
-                # Append to existing zarr store:
-                check_destination_exists(obj_store, dest)
-                t_start = time.time()
-                ds_filepath.to_zarr(mapper, append_dim=append_dim, consolidated=True)
-                t_end = time.time()
+            if obj_store.exists(dest):
                 logging.info(
-                    'Completed: Sent Dataset to s3://%s in %s', dest, t_end-t_start
+                    'Skipping: Variable exists in %s', dest
                     )
+            else:
+                try:
+                    # Append to existing zarr store:
+                    check_destination_exists(obj_store, dest)
+                    t_start = time.time()
+                    ds_filepath.to_zarr(mapper, append_dim=append_dim, consolidated=True)
+                    t_end = time.time()
+                    logging.info(
+                        'Completed: Sent Dataset to s3://%s in %s', dest, t_end-t_start
+                        )
 
-            except FileNotFoundError:
-                t_start = time.time()
-                ds_filepath.to_zarr(mapper, mode='w', consolidated=True)
-                t_end = time.time()
-                logging.info(
-                    'Completed: Sent Dataset to s3://%s in %s', dest, t_end-t_start
-                    )
+                except FileNotFoundError:
+                    t_start = time.time()
+                    ds_filepath.to_zarr(mapper, mode='w', consolidated=True)
+                    t_end = time.time()
+                    logging.info(
+                        'Completed: Sent Dataset to s3://%s in %s', dest, t_end-t_start
+                        )
 
-            # Release resources to avoid memory leaks:
-            ds_filepath.close()
+                # Release resources to avoid memory leaks:
+                ds_filepath.close()
             
         # === Shutdown Dask Cluster === #
         client.shutdown()
