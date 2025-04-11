@@ -5,6 +5,9 @@ import sys
 
 from ..object_store_handler import get_files, send, update
 from .argument_parser import __version__, create_parser
+from dask.distributed import Client
+from dask_jobqueue import SLURMCluster
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,59 @@ def initialise_logging():
     )
 
 
+def parse_slurm_job(job: dict) -> Client:
+    queue = job.get("queue", "par-single")
+    cores = job.get("cores", 16)
+    processes = job.get("processes", round(math.sqrt(cores)))
+    memory = job.get("memory", "256GB")
+    scale = job.get("scale", 1)
+    account = job.get("account", "atlantis_vis")
+
+    logging.info(
+        "Creating a SLURM cluster with %d cores, %d processes, %s of memory, and %d jobs.",
+        cores, processes, memory, scale
+    )
+    cluster = SLURMCluster(
+        queue=queue,
+        cores=cores,
+        processes=processes,  # processes = sqrt(cores) - recommended by JASMIN
+        memory=memory,
+        walltime="12:00:00",
+        job_extra_directives=[
+            "--output=slurm-%j.out",
+            "--error=slurm-%j.err",
+        ],  # SLURM job output and error files
+        account=account,
+    )
+    cluster.scale(jobs=scale)
+    client = Client(cluster)
+    return client
+
+def parse_job(job: dict) -> Client:
+    """Parse the job configuration.
+
+    Args:
+        job (dict): Job configuration.
+
+    Returns:
+        dask.distributed.Client: Dask client.
+    """
+    job_type = job.get("type", None)
+    if job_type == "slurm":
+        client = parse_slurm_job(job)
+    elif job_type == "local":
+        raise NotImplementedError("Local client not implemented.")
+    elif job_type == "threads":
+        client = job.get("num_threads", 4)
+        logging.info("Creating a threads client with %s threads.", client)
+    else:
+        raise ValueError(f"Job type {job_type} not supported.")
+    return {
+        "type": job_type,
+        "client": client,
+        "job": job,
+    }
+
 def process_action(args):
     """Process the selected action."""
     if len(sys.argv) == 1:
@@ -51,6 +107,10 @@ def process_action(args):
         else:
             send_vars_indep = False
 
+        if args.job is not None:
+            client = parse_job(args.job)
+        else:
+            client = None
         send(
             filepaths=list(args.filepaths),
             bucket=args.bucket,
@@ -63,6 +123,7 @@ def process_action(args):
             reproject=args.reproject,
             skip_integrity_check=args.skip_integrity_check,
             to_zarr_kwargs=None,
+            client=client,
         )
 
     elif args.action == "update":

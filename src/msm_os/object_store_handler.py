@@ -10,11 +10,14 @@ import iris
 import cartopy.crs as ccrs
 import cf_units
 import zarr
+from botocore.exceptions import ClientError
+import requests
 from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
+    wait_fixed,
 )
 from .exceptions import (
     DuplicatedAppendDimValue,
@@ -34,6 +37,9 @@ from .sanity_checks import (
 try:
     from dask.distributed import Client
     from dask.distributed import KilledWorker
+    from dask import delayed
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from tqdm import tqdm
 except ImportError:
     logging.warning(
         "Dask is not installed. Please install it to use parallel features."
@@ -109,7 +115,7 @@ def send(
     send_vars_indep: bool = True,
     append_dim: str = "time_counter",
     object_prefix: Optional[str] = None,
-    client: Optional[Client] = None,#
+    client: Optional[Client] = None,
     rechunk: dict = None,
     reproject: bool = False,
     skip_integrity_check: bool = False,
@@ -278,7 +284,46 @@ def _update_data(
     logging.info("Skipping %s because region not found in object store", mapper.root)
 
 
-@retry_strategy
+def main_send_variable(
+    ds_filepath,
+    obj_store,
+    var,
+    bucket,
+    object_prefix,
+    append_dim,
+    rechunk,
+    reproject,
+    skip_integrity_check
+):
+    """
+    Wrapper function to call _send_variable with external error handling.
+    This ensures graceful handling if retries are exhausted.
+    """
+    try:
+        _send_variable(
+            ds_filepath=ds_filepath,
+            obj_store=obj_store,
+            var=var,
+            bucket=bucket,
+            object_prefix=object_prefix,
+            append_dim=append_dim,
+            rechunk=rechunk,
+            reproject=reproject,
+            skip_integrity_check=skip_integrity_check,
+        )
+    except Exception as e:
+        # Log failure after exhausting retries and exit gracefully
+        logging.error(f"Failed to send variable '{var}' after multiple retries: {e}")
+        return  # Exit gracefully without raising the exception further
+
+
+# Retry 3 times with 2 seconds between retries
+@retry(
+    # retry=retry_if_exception_type((ClientError, requests.ConnectionError, OSError)),
+    retry=retry_if_exception_type(Exception),
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(2)  # Retry 3 times with 2 seconds between retries
+)
 def _send_variable(
     ds_filepath: xr.Dataset,
     obj_store: ObjectStoreS3,
@@ -296,7 +341,7 @@ def _send_variable(
     Parameters
     ----------
     ds_filepath
-        Filepath to the local dataset.
+        Filepath to the local dataset for the selected variable.
     obj_store
         Object store.
     var
@@ -315,8 +360,6 @@ def _send_variable(
     skip_integrity_check
         Whether to skip the data integrity check.
     """
-    check_variable_exists(ds_filepath, var)
-    ds_filepath_var = ds_filepath[[var]]
 
     dest = f"{bucket}/{object_prefix}/{var}.zarr"
     mapper = obj_store.get_mapper(dest)
@@ -324,7 +367,7 @@ def _send_variable(
     try:
         check_destination_exists(obj_store, dest)
 
-        if append_dim not in ds_filepath_var.dims:
+        if append_dim not in ds_filepath.dims:
             logging.info(
                 "Skipping %s because %s is not in the dimensions of %s",
                 dest,
@@ -337,15 +380,15 @@ def _send_variable(
 
         try:
             ds_obj_store = xr.open_zarr(mapper)
-            ds_filepath_var = check_duplicates(ds_filepath_var, ds_obj_store, append_dim)
+            ds_filepath = check_duplicates(ds_filepath, ds_obj_store, append_dim)
             if reproject:
                 # Reproject the dataset to the expected projection
-                ds_filepath_var = _reproject_ds(ds_filepath_var, var)
+                ds_filepath = _reproject_ds(ds_filepath, var)
 
             # Calculate expected size, variables, chunks and checksum
             if not skip_integrity_check:
-                ds_filepath_var = calculate_metadata(
-                    ds_obj_store, ds_filepath_var, var, append_dim, reproject
+                ds_filepath = calculate_metadata(
+                    ds_obj_store, ds_filepath, var, append_dim, reproject
                 )
 
             # Rechunk the dataset
@@ -355,7 +398,7 @@ def _send_variable(
                 new_chunking = {
                     dim: size
                     for dim, size in rechunk.items()
-                    if dim in ds_filepath[var].dims
+                    if dim in ds_filepath.dims
                 }
 
                 chunks_differ = any(
@@ -367,10 +410,10 @@ def _send_variable(
                     logging.warning("The actual data on the object store has chunk size: %s", actual_data_chunksize)
                     logging.warning("And you are trying to rechunk it to: %s", new_chunking)
                     logging.warning("You can't rechunk the data on the object store")
-                # ds_filepath_var = _rechunk_ds(ds_filepath_var, rechunk)
+                # ds_filepath = _rechunk_ds(ds_filepath, rechunk)
 
             # Append the variable to the object store
-            ds_filepath_var.to_zarr(
+            ds_filepath.to_zarr(
                 mapper, mode="a", append_dim=append_dim
             )
             first_file = False
@@ -385,33 +428,47 @@ def _send_variable(
                 "Skipping %s due to no %s on data dimensions", dest, append_dim
             )
             return
+        # except ClientError as e:
+        #     logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
+        #     logging.error("The retry decorator will retry the function if it is not the last attempt.")
+        #     raise e
+        # except OSError as e:
+        #     logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
+        #     logging.error("The retry decorator will retry the function if it is not the last attempt.")
+        #     raise e
+        except Exception as e:
+            logging.error(f"Failed to upload to S3: {e} for {dest} and {var}")
+            logging.error("Error type: %s", type(e).__name__)
+            logging.error("Error: %s", e)
+            raise e
+
     except FileNotFoundError:
         logging.info("Creating %s", dest)
         first_file = True
 
         if reproject:
             # Reproject the dataset to the expected projection
-            ds_filepath_var = _reproject_ds(ds_filepath_var, var)
+            ds_filepath = _reproject_ds(ds_filepath, var)
         if not skip_integrity_check:
-            ds_filepath_var = calculate_metadata(
+            ds_filepath = calculate_metadata(
                 xr.Dataset(),
-                ds_filepath_var,
+                ds_filepath,
                 var,
                 append_dim,
                 reproject,
                 first_file
             )
         if rechunk:
-            ds_filepath_var = _rechunk_ds(ds_filepath_var, rechunk)
+            ds_filepath = _rechunk_ds(ds_filepath, rechunk)
 
-        ds_filepath_var.to_zarr(mapper, mode="a")
+        ds_filepath.to_zarr(mapper, mode="a")
 
     if not skip_integrity_check:
         try:
             data_integrity_evaluation(var,
                                     append_dim,
                                     mapper,
-                                    ds_filepath_var,
+                                    ds_filepath,
                                     dest,
                                     reproject,
                                     first_file)
@@ -426,15 +483,17 @@ def _send_variable(
                                 object_prefix,
                                 var,
                                 append_dim)
-    else:
-        logging.warning("As requested, skipping data integrity check for %s", dest)
+    # else:
+    #     logging.warning("As requested, skipping data integrity check for %s", dest)
 
 
-def _rechunk_ds(ds_filepath: xr.Dataset, rechunk: dict) -> xr.Dataset:
+def _rechunk_ds(ds_filepath: xr.Dataset,
+                rechunk: dict) -> xr.Dataset:
     """ Rechunk the dataset.
 
     Args:
         ds_filepath (xr.Dataset): The dataset to be rechunked.
+        recunk (dict): The rechunk strategy dictionary.
 
     Returns:
         xr.Dataset: The rechunked dataset.
@@ -452,7 +511,7 @@ def _rechunk_ds(ds_filepath: xr.Dataset, rechunk: dict) -> xr.Dataset:
             ds_filepath[variable] = ds_filepath[
                 variable
             ].chunk(new_chunking)
-            
+
     return ds_filepath
 
 def _reproject_ds(ds_filepath: xr.Dataset, var: str) -> xr.Dataset:
@@ -652,27 +711,57 @@ def _send_data_to_store(
     if send_vars_indep:
         variables = _get_update_variables(ds_filepath, variables)
         if client:
-            futures = []
-            for var in variables:
-                futures.append(
-                    client.submit(
-                        _send_variable,
-                        ds_filepath,
-                        obj_store,
-                        var,
-                        bucket,
-                        object_prefix,
-                        append_dim,
-                        rechunk,
-                        reproject,
-                        skip_integrity_check
+            if client["type"] == "slurm":
+                # scattered_data = {}
+                # for var in variables:
+                #     check_variable_exists(ds_filepath, var)
+                #     ds_filepath_var = ds_filepath[[var]]
+                #     scattered_data[var] = client.scatter(ds_filepath_var)
+                futures = []
+                for var in variables:
+                    ds_filepath_var = ds_filepath[[var]]
+                    futures.append(
+                        client["client"].submit(
+                            main_send_variable,
+                            ds_filepath_var, # scattered_data[var],
+                            obj_store,
+                            var,
+                            bucket,
+                            object_prefix,
+                            append_dim,
+                            rechunk,
+                            reproject,
+                            skip_integrity_check
+                        )
                     )
-                )
-            client.gather(futures)
+                client["client"].gather(futures)
+            elif client["type"] == "threads":
+                with ThreadPoolExecutor(max_workers=client["client"]) as executor:
+                    futures = [
+                        executor.submit(
+                            main_send_variable,
+                            ds_filepath[[var]],
+                            obj_store,
+                            var,
+                            bucket,
+                            object_prefix,
+                            append_dim,
+                            rechunk,
+                            reproject,
+                            skip_integrity_check
+                        )
+                        for var in variables
+                    ]
+                    for future in tqdm(as_completed(futures), desc="Processing variables", total=len(futures)):
+                        future.result()
+            else:
+                raise ValueError(f"Job type {client['type']} not supported.")
         else:
             for var in variables:
-                _send_variable(
-                    ds_filepath,
+                check_variable_exists(ds_filepath, var)
+                ds_filepath_var = ds_filepath[[var]]
+                main_send_variable(
+                    ds_filepath_var,
                     obj_store,
                     var,
                     bucket,
