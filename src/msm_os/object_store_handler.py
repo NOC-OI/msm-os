@@ -721,7 +721,7 @@ def _send_data_to_store(
                 for var in variables:
                     ds_filepath_var = ds_filepath[[var]]
                     futures.append(
-                        client.submit(
+                        client["client"].submit(
                             main_send_variable,
                             ds_filepath_var, # scattered_data[var],
                             obj_store,
@@ -734,7 +734,7 @@ def _send_data_to_store(
                             skip_integrity_check
                         )
                     )
-                client.gather(futures)
+                client["client"].gather(futures)
             elif client["type"] == "threads":
                 with ThreadPoolExecutor(max_workers=client["client"]) as executor:
                     futures = [
