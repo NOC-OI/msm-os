@@ -41,12 +41,13 @@ def initialise_logging():
 
 
 def parse_slurm_job(job: dict) -> Client:
-    job_type = job.get("type")
     queue = job.get("queue", "par-single")
     cores = job.get("cores", 16)
     processes = job.get("processes", round(math.sqrt(cores)))
     memory = job.get("memory", "256GB")
     scale = job.get("scale", 1)
+    account = job.get("account", "atlantis_vis")
+
     logging.info(
         "Creating a SLURM cluster with %d cores, %d processes, %s of memory, and %d jobs.",
         cores, processes, memory, scale
@@ -61,6 +62,7 @@ def parse_slurm_job(job: dict) -> Client:
             "--output=slurm-%j.out",
             "--error=slurm-%j.err",
         ],  # SLURM job output and error files
+        account=account,
     )
     cluster.scale(jobs=scale)
     client = Client(cluster)
